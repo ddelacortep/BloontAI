@@ -1,9 +1,13 @@
-<script setup>
-import router from './router';
+<script setup> 
+
+console.log("App.vue loaded")
 </script>
 
 <template>
-    <router-view></router-view>
+  <div id="app">
+    <router-view/>
+
+  </div>  
 </template>
 
 <style scoped>

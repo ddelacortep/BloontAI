@@ -1,5 +1,5 @@
 <template>
-    <div id="container">
+    <div id="containerHeader">
         <div id="izquierda">
             <h1 style="font-family: Montserrat;">BloontAI</h1>
         </div>
@@ -27,7 +27,7 @@ const header = [
 </script>
 
 <style>
-#container {
+#containerHeader {
     display: flex;
     justify-content: space-between;
     align-items: center;
@@ -56,6 +56,7 @@ const header = [
     border-color: transparent;
     color: black;
     font-family: "Montserrat";
+    font-size: 18px;
 }
 
 .primerosPasos {
@@ -64,6 +65,7 @@ const header = [
     color: white;
     font-family: "Montserrat";
     border-radius: 30px;
+    font-size: 18px;
 }
 
 .menu {

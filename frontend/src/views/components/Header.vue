@@ -4,8 +4,10 @@
             <h1 style="font-family: Montserrat;">BloontAI</h1>
         </div>
         <div id="derecha">
-            <Botones v-for="item in header" :key="item.id" :class="item.class" @click="$emit(item.link)">
+            <Botones v-for="item in header" :key="item.id" :class="item.class">
+                <router-link :to="item.link">
                 <p>{{ item.label }}</p>
+                </router-link>
             </Botones>
         </div>
     </div>
@@ -17,11 +19,11 @@ import Botones from './Botones.vue';
 
 const header = [
     {
-        id: 2, label: 'FAQs', link: '#faqs', class: 'faqs'
+        id: 2, label: 'FAQs', link: '/faqs', class: 'faqs'
     },
     {
 
-        id: 1, label: 'Primeros Pasos', link: '#primerosPasos', class: 'primerosPasos'
+        id: 1, label: 'Primeros Pasos', link: '/clases', class: 'primerosPasos'
     },
 ]
 </script>

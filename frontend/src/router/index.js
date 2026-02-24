@@ -1,6 +1,6 @@
 import { createRouter, createWebHistory } from "vue-router";
 import HomeView from "../views/HomeView.vue";
-import SeleccionClase from "../views/SeleccionClase.vue";
+import ModeloImagenes from "../views/ModeloImagenes.vue";
 
 
 
@@ -15,7 +15,7 @@ const router = createRouter({
         {
             path: "/clases",
             name: "clases",
-            component: SeleccionClase,
+            component: ModeloImagenes,
         }
     ]
 });

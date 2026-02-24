@@ -12,6 +12,7 @@
 .button {
     cursor: pointer;
     transition: all 0.3s ease;
+    text-decoration: none;
 }
 
 .button:hover {
@@ -21,5 +22,11 @@
 
 .button:active {
     transform: translateY(0);
+}
+
+a{
+    text-decoration: none;
+    color: black;
+    font-weight: bold;
 }
 </style>    

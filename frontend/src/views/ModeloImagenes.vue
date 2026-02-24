@@ -1,5 +1,6 @@
 <script setup>
 import { ref, reactive, computed, nextTick, onUnmounted } from 'vue'
+import Header from './components/Header.vue'
 
 const API = '/api'
 
@@ -224,12 +225,7 @@ onUnmounted(() => {
 <template>
   <div class="app">
 
-    <!-- Cabecera -->
-    <header class="topbar">
-      <div class="topbar-title">🎯 Clasificador Webcam · Transfer Learning</div>
-      <button class="btn btn-ghost" @click="resetAll" title="Reiniciar todo">↺ Reiniciar</button>
-    </header>
-
+    <Header />
     <!-- ─── Layout de flujo ──────────────────────────────────────────────── -->
     <div class="flow-root">
 
@@ -421,27 +417,29 @@ onUnmounted(() => {
 * { box-sizing: border-box; }
 
 .app {
-  font-family: system-ui, sans-serif;
-  background: #0d0d14;
-  color: #e5e5e5;
+  font-family: 'Montserrat', system-ui, sans-serif;
+  background: #ffffff;
+  color: #1a1a1a;
   min-height: 100vh;
 }
 
-/* ─── Topbar ──────────────────────────────────────────────────────────────── */
-.topbar {
-  background: #13132a;
-  border-bottom: 2px solid #7c3aed;
-  padding: 0.9rem 2rem;
+/* ─── Barra de acciones ───────────────────────────────────────────────────── */
+.actions-bar {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  padding: 0.7rem 2rem;
+  border-bottom: 1px solid #e5e7eb;
+  background: #f9fafb;
 }
-.topbar-title { font-size: 1.2rem; font-weight: 700; color: #a78bfa; }
+.page-title { font-size: 1rem; font-weight: 700; color: #1B512D; font-family: 'Montserrat', sans-serif; }
 
 /* ─── Layout de flujo horizontal ─────────────────────────────────────────── */
 .flow-root {
   display: flex;
   align-items: flex-start;
+  justify-content: center;
+  flex-wrap: wrap;
   gap: 0;
   padding: 2rem 1.5rem;
   overflow-x: auto;
@@ -535,16 +533,16 @@ onUnmounted(() => {
 
 /* ─── Botón añadir clase ─────────────────────────────────────────────────── */
 .add-class-btn {
-  border: 2px dashed #4c4c8a;
+  border: 2px dashed #1B512D;
   background: transparent;
-  color: #a78bfa;
+  color: #1B512D;
   font-size: 0.9rem;
   padding: 0.7rem;
   border-radius: 12px;
   cursor: pointer;
   transition: background 0.2s;
 }
-.add-class-btn:hover { background: rgba(124,58,237,0.1); }
+.add-class-btn:hover { background: rgba(27,81,45,0.08); }
 
 /* ─── Conector ───────────────────────────────────────────────────────────── */
 .connector {
@@ -560,8 +558,8 @@ onUnmounted(() => {
   transition: opacity 0.3s;
 }
 .connector.dimmed { opacity: 0.3; }
-.connector-line  { width: 40px; height: 2px; background: #4c4c8a; }
-.connector-arrow { color: #4c4c8a; font-size: 0.9rem; margin-left: -4px; }
+.connector-line  { width: 40px; height: 2px; background: #b1cf5f; }
+.connector-arrow { color: #1B512D; font-size: 0.9rem; margin-left: -4px; }
 
 /* ─── Tarjeta central (entrenamiento) ────────────────────────────────────── */
 .center-card {
@@ -677,6 +675,6 @@ button:disabled { opacity: 0.35; cursor: not-allowed; }
 .btn-success { background: #059669; color: #fff; }
 .btn-danger  { background: #dc2626; color: #fff; }
 .btn-info    { background: #0369a1; color: #fff; }
-.btn-ghost   { background: rgba(255,255,255,0.08); color: #ccc; border: 1px solid #444; }
+.btn-ghost   { background: rgba(0,0,0,0.04); color: #555; border: 1px solid #ccc; }
 </style>
 

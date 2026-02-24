@@ -13,8 +13,8 @@ const router = createRouter({
             component: HomeView,
         },
         {
-            path: "/clases",
-            name: "clases",
+            path: "/modelo-imagenes",
+            name: "modelo-imagenes",
             component: ModeloImagenes,
         }
     ]

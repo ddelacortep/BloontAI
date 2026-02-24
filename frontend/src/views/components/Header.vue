@@ -23,7 +23,7 @@ const header = [
     },
     {
 
-        id: 1, label: 'Primeros Pasos', link: '/clases', class: 'primerosPasos'
+        id: 1, label: 'Primeros Pasos', link: '/seleccion-modelo', class: 'primerosPasos'
     },
 ]
 </script>

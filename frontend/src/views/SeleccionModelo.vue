@@ -89,7 +89,7 @@ const modelos = ref([
     icono: '🎯'
   },
   {
-    id: 2,
+    id: 2, label: 'Imagen',link: '/modelo-imagenes', class: 'modelo-imagenes',
     nombre: 'Imagen',
     descripcion: 'Realiza la preparación con imágenes de archivos o webcam.',
     icono: '🖼️'
@@ -123,6 +123,10 @@ function nextModel() {
 
 function seleccionarModelo(index) {
   modeloActivo.value = index
+  const modelo = modelos.value[index]
+  if (modelo.link) {
+    router.push(modelo.link)
+  }
 }
 
 // Funciones de subida de archivos

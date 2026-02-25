@@ -90,7 +90,7 @@ const modelos = ref([
     icono: '🎯'
   },
   {
-    id: 2, label: 'Imagen',link: '/modelo-imagenes', class: 'modelo-imagenes',
+    id: 2, label: 'Imagen', link: '/modelo-imagenes', class: 'modelo-imagenes',
     nombre: 'Imagen',
     descripcion: 'Realiza la preparación con imágenes de archivos o webcam.',
     icono: '🖼️'

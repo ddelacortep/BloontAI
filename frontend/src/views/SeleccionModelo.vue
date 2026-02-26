@@ -83,25 +83,38 @@ const modeloActivo = ref(1)
 // Modelos disponibles
 const modelos = ref([
   {
-    id: 1,
-    nombre: 'SeleccionClase',
-    descripcion: 'Entrena tu modelo con clases personalizadas usando imágenes.',
-    icono: '🎯'
+    id: 1, 
+    label: 'Audio', 
+    link: '/modelo-audio', 
+    class: 'modelo-audio',
+    nombre: 'SeleccionAudio',
+    descripcion: 'Entrena tu modelo con clases personalizadas usando audio.',
+    icono: '🎤'
   },
   {
+    id: 2, 
+    label: 'Imagen', 
+    link: '/modelo-imagenes', 
+    class: 'modelo-imagenes',
     id: 2, label: 'Imagen',link: '/modelo-imagenes', class: 'modelo-imagenes',
     nombre: 'Imagen',
     descripcion: 'Realiza la preparación con imágenes de archivos o webcam.',
     icono: '🖼️'
   },
   {
-    id: 3,
+    id: 3, 
+    label: 'Video', 
+    link: '/modelo-videos', 
+    class: 'modelo-videos',
     nombre: 'Video',
     descripcion: 'Procesa y analiza videos desde archivos o captura.',
     icono: '🎥'
   },
   {
-    id: 4,
+    id: 4, 
+    label: 'Audio', 
+    link: '/modelo-audio', 
+    class: 'modelo-audio',
     nombre: 'Transcribir',
     descripcion: 'Convierte audio en texto con reconocimiento de voz.',
     icono: '📝'

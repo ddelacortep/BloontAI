@@ -6,7 +6,7 @@ import Botones from './components/Botones.vue'
 
 const router = useRouter()
 
-// Estado del video
+
 const videoFile = ref(null)
 const videoPreview = ref(null)
 const isProcessing = ref(false)
@@ -14,7 +14,7 @@ const processingProgress = ref(0)
 const processingMsg = ref('')
 const resultVideo = ref(null)
 
-// Funciones
+
 function handleVideoUpload(event) {
   const file = event.target.files[0]
   if (file && file.type.startsWith('video/')) {
@@ -38,12 +38,11 @@ async function startTraining() {
   processingProgress.value = 0
   processingMsg.value = 'Analizando video...'
   
-  // Simulación de progreso (aquí iría la lógica real)
-  // TODO: Implementar conexión con backend
+ 
 }
 
 function downloadResult() {
-  // TODO: Implementar descarga del video resultado
+  
   alert('Funcionalidad en desarrollo')
 }
 </script>
@@ -52,7 +51,7 @@ function downloadResult() {
   <Header></Header>
   
   <div class="app">
-    <!-- Barra de acciones -->
+    
     <div class="actions-bar">
       <Botones class="btn-back" @click="router.push('/SeleccionM')">
         <p>← Volver</p>
@@ -61,9 +60,9 @@ function downloadResult() {
       <div></div>
     </div>
 
-    <!-- Contenido principal -->
+    
     <div class="main-content">
-      <!-- Panel izquierdo: Subir video -->
+      
       <div class="panel panel-upload">
         <div class="panel-header">
           <span class="panel-icon">📹</span>
@@ -107,13 +106,13 @@ function downloadResult() {
         </div>
       </div>
 
-      <!-- Conector -->
+      
       <div class="connector">
         <div class="connector-line"></div>
         <div class="connector-arrow">▶</div>
       </div>
 
-      <!-- Panel central: Procesamiento -->
+      
       <div class="panel panel-process">
         <div class="panel-header">
           <span class="panel-icon">🧠</span>
@@ -165,13 +164,13 @@ function downloadResult() {
         </div>
       </div>
 
-      <!-- Conector -->
+      
       <div class="connector">
         <div class="connector-line"></div>
         <div class="connector-arrow">▶</div>
       </div>
 
-      <!-- Panel derecho: Resultado -->
+      
       <div class="panel panel-result">
         <div class="panel-header">
           <span class="panel-icon">🐍</span>
@@ -217,7 +216,7 @@ function downloadResult() {
   min-height: 100vh;
 }
 
-/* ─── Barra de acciones ─────────────────────────────────────────────────── */
+
 .actions-bar {
   display: flex;
   align-items: center;
@@ -248,7 +247,7 @@ function downloadResult() {
   color: #1B512D;
 }
 
-/* ─── Contenido principal ───────────────────────────────────────────────── */
+
 .main-content {
   display: flex;
   align-items: flex-start;
@@ -258,7 +257,7 @@ function downloadResult() {
   min-height: calc(100vh - 140px);
 }
 
-/* ─── Paneles ───────────────────────────────────────────────────────────── */
+
 .panel {
   background: #fff;
   border-radius: 20px;
@@ -291,7 +290,7 @@ function downloadResult() {
   padding: 1.5rem;
 }
 
-/* ─── Área de subida ────────────────────────────────────────────────────── */
+
 .upload-area {
   border: 3px dashed #7FD1AE;
   border-radius: 15px;
@@ -388,7 +387,7 @@ function downloadResult() {
   color: #1B512D;
 }
 
-/* ─── Conector ──────────────────────────────────────────────────────────── */
+
 .connector {
   display: flex;
   flex-direction: column;
@@ -409,7 +408,7 @@ function downloadResult() {
   margin-top: -0.5rem;
 }
 
-/* ─── Panel de procesamiento ────────────────────────────────────────────── */
+
 .process-idle {
   text-align: center;
 }
@@ -469,7 +468,7 @@ function downloadResult() {
   margin: 0;
 }
 
-/* ─── Progreso ──────────────────────────────────────────────────────────── */
+
 .process-running {
   text-align: center;
 }
@@ -511,7 +510,7 @@ function downloadResult() {
   font-size: 0.95rem;
 }
 
-/* ─── Resultado ─────────────────────────────────────────────────────────── */
+
 .result-area {
   border: 3px dashed #7FD1AE;
   border-radius: 15px;
@@ -560,7 +559,7 @@ function downloadResult() {
   color: white;
 }
 
-/* ─── Responsive ────────────────────────────────────────────────────────── */
+
 @media (max-width: 1200px) {
   .main-content {
     flex-direction: column;

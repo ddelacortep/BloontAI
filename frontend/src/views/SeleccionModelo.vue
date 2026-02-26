@@ -2,16 +2,15 @@
   <Header></Header>
   
   <div class="container-seleccion">
-    <!-- Botón izquierdo -->
-    <div class="seccion-izquierda">
-      <Botones class="boton-volver" @click="router.push('/')">
-        <p>← Inicio</p>
-      </Botones>
-    </div>
-
     <!-- Carrusel central de modelos -->
     <div class="seccion-central">      
       <div class="carrusel-container">
+        <div class="controles-izquierda">
+          <Botones class="boton-volver" @click="router.push('/')">
+            <p>← Inicio</p>
+          </Botones>
+        </div>
+
         <div class="carrusel-modelos">
           <div 
             v-for="(modelo, index) in modelos" 
@@ -90,7 +89,7 @@ const modelos = ref([
     icono: '🎯'
   },
   {
-    id: 2, label: 'Imagen', link: '/modelo-imagenes', class: 'modelo-imagenes',
+    id: 2, label: 'Imagen',link: '/modelo-imagenes', class: 'modelo-imagenes',
     nombre: 'Imagen',
     descripcion: 'Realiza la preparación con imágenes de archivos o webcam.',
     icono: '🖼️'
@@ -150,33 +149,25 @@ function subirDesdeDrive() {
 <style scoped>
 .container-seleccion {
   display: grid;
-  grid-template-columns: 150px 1fr 200px;
+  grid-template-columns: 1fr 200px;
   gap: 40px;
   padding: 20px 60px;
   min-height: 70vh;
   align-items: start;
-  max-width: 1400px;
+  max-width: 1200px;
   margin: 0 auto;
-}
-
-/* ==================== SECCIÓN IZQUIERDA ==================== */
-.seccion-izquierda {
-  display: flex;
-  align-items: center;
-  justify-content: center;
 }
 
 .boton-volver {
   background-color: #1B512D;
   border-radius: 20px;
-  padding: 16px 24px;
+  padding: 12px 20px;
   color: white;
   font-family: 'Montserrat', sans-serif;
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 600;
   border: none;
-  width: 100%;
-  min-height: 60px;
+  min-height: 45px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -187,7 +178,7 @@ function subirDesdeDrive() {
   color: white;
 }
 
-/* ==================== SECCIÓN CENTRAL - CARRUSEL ==================== */
+
 .seccion-central {
   display: flex;
   flex-direction: column;
@@ -201,8 +192,14 @@ function subirDesdeDrive() {
   align-items: center;
   gap: 30px;
   width: 100%;
-  max-width: 700px;
+  max-width: 800px;
   position: relative;
+}
+
+.controles-izquierda {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
 
 .carrusel-modelos {
@@ -357,7 +354,7 @@ function subirDesdeDrive() {
   line-height: 1;
 }
 
-/* ==================== SECCIÓN DERECHA ==================== */
+
 .seccion-derecha {
   display: flex;
   flex-direction: column;
@@ -408,7 +405,7 @@ function subirDesdeDrive() {
   transform: translateY(-1px);
 }
 
-/* ==================== RESPONSIVE ==================== */
+
 @media (max-width: 1024px) {
   .container-seleccion {
     grid-template-columns: 1fr;

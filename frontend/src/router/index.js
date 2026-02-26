@@ -1,7 +1,6 @@
 import { createRouter, createWebHistory } from "vue-router";
 import HomeView from "../views/HomeView.vue";
 import ModeloImagenes from "../views/ModeloImagenes.vue";
-import ModeloTexto from "@/views/ModeloTexto.vue";
 import SeleccionModelo from "@/views/SeleccionModelo.vue";
 
 
@@ -18,11 +17,6 @@ const router = createRouter({
             path: "/modelo-imagenes",
             name: "modelo-imagenes",
             component: ModeloImagenes,
-        },
-        {
-            path: "/modelo-texto",
-            name: "modelo-texto",
-            component: ModeloTexto,
         },
         {
             path: "/seleccion-modelo",

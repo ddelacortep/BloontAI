@@ -20,8 +20,12 @@ from typing import Optional
 import tensorflow as tf
 import librosa
 
+import json
+import textwrap
+
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
 from pydantic import BaseModel
 
 # ─── Configuración ───────────────────────────────────────────────────────────
@@ -328,6 +332,236 @@ def reset_audio():
     state.norm_mean  = None
     state.norm_std   = None
     return {"message": "Datos de audio limpiados."}
+
+
+@app.get("/audio/export/python")
+def export_python():
+    """Genera y devuelve voice_recognizer.py listo para descargar."""
+    if state.model is None:
+        raise HTTPException(400, "No hay modelo entrenado.")
+
+    label_map  = {str(k): v for k, v in state.label_map.items()}
+    norm_mean  = state.norm_mean.tolist()
+    norm_std   = state.norm_std.tolist()
+    weights    = [w.tolist() for w in state.model.get_weights()]
+    users_list = list(state.label_map.values())
+
+    code = textwrap.dedent(f"""\
+        #!/usr/bin/env python3
+        \"\"\"
+        voice_recognizer.py — Generado por BloontAI Voice Recognition
+        Usuarios: {', '.join(users_list)}
+
+        Dependencias:
+          pip install numpy librosa fastapi uvicorn
+
+        Uso:
+          python voice_recognizer.py
+          # POST http://localhost:8001/audio/predict
+          # Body: {{ "audio_b64": "<pcm-float32-base64>", "sample_rate": 48000 }}
+        \"\"\"
+
+        from __future__ import annotations
+        import base64
+        import numpy as np
+        import librosa
+        from fastapi import FastAPI, HTTPException
+        from fastapi.middleware.cors import CORSMiddleware
+        from pydantic import BaseModel
+
+        LABEL_MAP  = {json.dumps(label_map)}
+        NORM_MEAN  = np.array({json.dumps(norm_mean)}, dtype=np.float32)
+        NORM_STD   = np.array({json.dumps(norm_std)},  dtype=np.float32)
+        WEIGHTS    = [np.array(w, dtype=np.float32) for w in {json.dumps(weights)}]
+
+        AUDIO_SR = 22050
+        N_MFCC   = 40
+
+        def _relu(x):        return np.maximum(0, x)
+        def _softmax(x):     e = np.exp(x - x.max()); return e / e.sum()
+        def _dense(x, W, b): return x @ W + b
+        def _bn(x, g, b, m, v, eps=1e-3): return g * (x - m) / np.sqrt(v + eps) + b
+
+        def _forward(x):
+            W = WEIGHTS
+            x = _relu(_bn(_dense(x, W[0], W[1]),  W[2],  W[3],  W[4],  W[5]))
+            x = _relu(_bn(_dense(x, W[6], W[7]),  W[8],  W[9],  W[10], W[11]))
+            x = _relu(_dense(x, W[12], W[13]))
+            return _softmax(_dense(x, W[14], W[15]))
+
+        def extract_features(audio: np.ndarray, sr: int = 48000) -> np.ndarray:
+            audio = audio.astype(np.float64)
+            if sr != AUDIO_SR:
+                audio = librosa.resample(audio, orig_sr=sr, target_sr=AUDIO_SR)
+            mfccs    = librosa.feature.mfcc(y=audio, sr=AUDIO_SR, n_mfcc=N_MFCC)
+            deltas   = librosa.feature.delta(mfccs)
+            chroma   = librosa.feature.chroma_stft(y=audio, sr=AUDIO_SR)
+            contrast = librosa.feature.spectral_contrast(y=audio, sr=AUDIO_SR)
+            zcr      = librosa.feature.zero_crossing_rate(y=audio)
+            return np.concatenate([
+                np.mean(mfccs.T,    0), np.std(mfccs.T,    0),
+                np.mean(deltas.T,   0), np.std(deltas.T,   0),
+                np.mean(chroma.T,   0), np.std(chroma.T,   0),
+                np.mean(contrast.T, 0), np.std(contrast.T, 0),
+                [np.mean(zcr),          np.std(zcr)],
+            ]).astype(np.float32)
+
+        app = FastAPI(title="BloontAI Voice Recognizer")
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=["*"], allow_methods=["*"], allow_headers=["*"],
+        )
+
+        class Payload(BaseModel):
+            audio_b64:   str
+            sample_rate: int = 48000
+
+        @app.post("/audio/predict")
+        def predict(payload: Payload):
+            raw   = base64.b64decode(payload.audio_b64)
+            audio = np.frombuffer(raw, dtype=np.float32)
+            if len(audio) < 1000:
+                raise HTTPException(400, "Audio demasiado corto.")
+            feat  = extract_features(audio, payload.sample_rate)
+            feat  = (feat - NORM_MEAN) / NORM_STD
+            probs = _forward(feat)
+            idx   = int(np.argmax(probs))
+            return {{
+                "label":         LABEL_MAP[str(idx)],
+                "confidence":    round(float(probs[idx]), 4),
+                "probabilities": {{LABEL_MAP[str(i)]: round(float(p), 4) for i, p in enumerate(probs)}},
+            }}
+
+        @app.get("/")
+        def root():
+            return {{"status": "ok", "users": list(LABEL_MAP.values())}}
+
+        if __name__ == "__main__":
+            import uvicorn
+            uvicorn.run("voice_recognizer:app", host="0.0.0.0", port=8001, reload=False)
+        """)
+
+    return Response(
+        content=code,
+        media_type="text/plain",
+        headers={"Content-Disposition": 'attachment; filename="voice_recognizer.py"'},
+    )
+
+
+@app.get("/audio/export/js")
+def export_js():
+    """Genera y devuelve voice_recognizer.js listo para descargar."""
+    if state.model is None:
+        raise HTTPException(400, "No hay modelo entrenado.")
+
+    users_list = list(state.label_map.values())
+
+    code = textwrap.dedent(f"""\
+        /**
+         * voice_recognizer.js — Generado por BloontAI Voice Recognition
+         * Usuarios: {', '.join(users_list)}
+         *
+         * Requiere el servidor Python en ejecucion:
+         *   python voice_recognizer.py   (escucha en http://localhost:8001)
+         *
+         * Uso:
+         *   <script src="voice_recognizer.js"></script>
+         *
+         *   VoiceRecognizer.predict()
+         *     .then(r => console.log(r.label, r.confidence));
+         *
+         *   VoiceRecognizer.startListening(
+         *     result => console.log(result.label, result.probabilities),
+         *     error  => console.error(error)
+         *   );
+         *   VoiceRecognizer.stopListening();
+         */
+        const VoiceRecognizer = (function () {{
+          'use strict';
+
+          var SERVER   = 'http://localhost:8001';
+          var SR       = 48000;
+          var SECONDS  = 3;
+
+          function float32ToBase64(arr) {{
+            var b = new Uint8Array(arr.buffer), s = '';
+            for (var i = 0; i < b.byteLength; i++) s += String.fromCharCode(b[i]);
+            return btoa(s);
+          }}
+
+          function sleep(ms) {{ return new Promise(function(r){{ setTimeout(r, ms); }}); }}
+
+          function record() {{
+            return navigator.mediaDevices.getUserMedia({{
+              audio: {{ sampleRate: SR, channelCount: 1, echoCancellation: false, noiseSuppression: false }},
+            }}).then(function(stream) {{
+              return new Promise(function(resolve) {{
+                var ctx  = new AudioContext({{ sampleRate: SR }});
+                var src  = ctx.createMediaStreamSource(stream);
+                var proc = ctx.createScriptProcessor(4096, 1, 1);
+                var buf  = [];
+                proc.onaudioprocess = function(e) {{
+                  buf.push(new Float32Array(e.inputBuffer.getChannelData(0)));
+                }};
+                src.connect(proc); proc.connect(ctx.destination);
+                sleep(SECONDS * 1000).then(function() {{
+                  proc.disconnect(); src.disconnect();
+                  stream.getTracks().forEach(function(t){{ t.stop(); }});
+                  ctx.close().then(function() {{
+                    var len = buf.reduce(function(a,c){{ return a+c.length; }}, 0);
+                    var pcm = new Float32Array(len), off = 0;
+                    buf.forEach(function(c){{ pcm.set(c, off); off += c.length; }});
+                    resolve(pcm);
+                  }});
+                }});
+              }});
+            }});
+          }}
+
+          function sendAudio(pcm) {{
+            return fetch(SERVER + '/audio/predict', {{
+              method: 'POST',
+              headers: {{ 'Content-Type': 'application/json' }},
+              body: JSON.stringify({{ audio_b64: float32ToBase64(pcm), sample_rate: SR }}),
+            }}).then(function(r) {{
+              if (!r.ok) return r.json().then(function(e){{ throw new Error(e.detail || r.status); }});
+              return r.json();
+            }});
+          }}
+
+          var _active = false, _stop = false;
+
+          return {{
+            setServer: function(url) {{ SERVER = url; }},
+            setSeconds: function(s)  {{ SECONDS = s;  }},
+            isListening: function()  {{ return _active; }},
+
+            predict: function() {{
+              return record().then(sendAudio);
+            }},
+
+            startListening: function(onResult, onError) {{
+              if (_active) return;
+              _active = true; _stop = false;
+              (function loop() {{
+                if (_stop) {{ _active = false; return; }}
+                record().then(sendAudio)
+                  .then(function(r)  {{ if (!_stop && onResult) onResult(r); return sleep(300); }})
+                  .catch(function(e) {{ if (onError) onError(e); return sleep(500); }})
+                  .then(loop);
+              }})();
+            }},
+
+            stopListening: function() {{ _stop = true; }},
+          }};
+        }}());
+        """)
+
+    return Response(
+        content=code,
+        media_type="text/plain",
+        headers={"Content-Disposition": 'attachment; filename="voice_recognizer.js"'},
+    )
 
 # ─── Main ─────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":

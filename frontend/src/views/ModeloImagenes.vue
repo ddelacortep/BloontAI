@@ -2,68 +2,108 @@
 import { ref, reactive, computed, nextTick, onUnmounted } from 'vue'
 import Header from './components/Header.vue'
 
+// ─── Constantes ───────────────────────────────────────────────────────────────
 const API = '/api'
 
-// ─── Paleta de colores ────────────────────────────────────────────────────
+// Colores asignados rotativamente a cada clase de entrenamiento
 const PALETTE = ['#7c3aed', '#059669', '#0369a1', '#d97706', '#dc2626', '#0891b2', '#65a30d']
 
-// ─── Clases: array reactivo de objetos ────────────────────────────────────
-// Cada clase tiene su propia cámara y contador de imágenes
+// Mínimo de imágenes que debe tener cada clase para poder entrenar
+const MIN_IMAGES_PER_CLASS = 15
+
+// ─── Estado de las clases de entrenamiento ────────────────────────────────────
+// Cada clase tiene su propia cámara, contador de imágenes y objetivo de captura configurable
 const classes = reactive([
-  { id: 1, name: '', imageCount: 0, color: PALETTE[0], cameraOn: false, capturing: false, capturePct: 0, captureMsg: '' },
-  { id: 2, name: '', imageCount: 0, color: PALETTE[1], cameraOn: false, capturing: false, capturePct: 0, captureMsg: '' },
+  {
+    id: 1, name: '', imageCount: 0, color: PALETTE[0],
+    cameraOn: false, capturing: false,
+    captureProgress: 0, captureMessage: '',
+    captureTarget: MIN_IMAGES_PER_CLASS,
+  },
+  {
+    id: 2, name: '', imageCount: 0, color: PALETTE[1],
+    cameraOn: false, capturing: false,
+    captureProgress: 0, captureMessage: '',
+    captureTarget: MIN_IMAGES_PER_CLASS,
+  },
 ])
-let nextId = 3
+let nextClassId = 3
 
-// Refs dinámicos para los elementos <video> de cada clase (keyed por cls.id)
-const videoEls = reactive({})     // { [id]: HTMLVideoElement }
-const streams  = reactive({})     // { [id]: MediaStream }
+// Referencias a los elementos <video> y los MediaStreams de cada clase (indexados por cls.id)
+const cameraElements = reactive({})   // { [id]: HTMLVideoElement }
+const cameraStreams  = reactive({})   // { [id]: MediaStream }
 
-// ─── Fase de la app ───────────────────────────────────────────────────────
-// 'capture' | 'training' | 'predict'
-const phase = ref('capture')
+// ─── Fase de la aplicación ────────────────────────────────────────────────────
+// 'capture'  → el usuario captura imágenes de entrenamiento
+// 'training' → el modelo está entrenando o ya ha terminado
+const appPhase = ref('capture')
 
-// ─── Entrenamiento ────────────────────────────────────────────────────────
-const trainRunning  = ref(false)
-const trainMsg      = ref('')
-const trainPct      = ref(0)
-const trainDone     = ref(false)
-const trainAccuracy = ref(null)
+// ─── Estado del entrenamiento ─────────────────────────────────────────────────
+const isTraining         = ref(false)   // True mientras la petición /train está en curso
+const trainingMessage    = ref('')      // Texto de estado que se muestra al usuario
+const trainingProgress   = ref(0)       // Porcentaje de progreso visual (0–100)
+const isTrainingComplete = ref(false)   // True cuando el entrenamiento ha concluido con éxito
+const trainingAccuracy   = ref(null)    // Precisión en validación devuelta por el backend
 
-// ─── Predicción ───────────────────────────────────────────────────────────
-const predictVideoEl  = ref(null)
-const predictStream   = ref(null)
-const predictInterval = ref(null)
-const predicting      = ref(false)
-const overlayLabel    = ref('—')
-const overlayConf     = ref('')
-const probClasses     = ref([])
-const probData        = reactive({})   // { cls: { pct: 0 } }
-const logLines        = ref([])
+// ─── Configuración de hiperparámetros (modal de ajustes) ──────────────────────
+const showTrainingSettings = ref(false)   // Controla si el modal de configuración es visible
+const trainingConfig = reactive({
+  epochs:       20,       // Número máximo de épocas
+  batchSize:    16,       // Imágenes procesadas por paso de gradiente
+  learningRate: 0.0001,   // Tasa de aprendizaje inicial del optimizador Adam
+})
 
-// ─── Computed ─────────────────────────────────────────────────────────────
-const canTrain = computed(() =>
-  classes.filter(c => c.name.trim()).length >= 2 &&
-  classes.filter(c => c.name.trim()).every(c => c.imageCount >= 5)
-)
+// ─── Estado de la predicción en tiempo real ───────────────────────────────────
+const predictCameraEl     = ref(null)   // Elemento <video> de la sección de predicción
+const predictCameraStream = ref(null)   // MediaStream activo de la cámara de predicción
+const predictionTimer     = ref(null)   // Intervalo que dispara la inferencia periódicamente
+const isPredicting        = ref(false)  // True cuando la predicción continua está activa
 
-// ─── Gestión de clases ────────────────────────────────────────────────────
+// Resultado de la última predicción (mostrado en el overlay del video)
+const predictedLabel      = ref('—')   // Nombre de la clase predicha
+const predictedConfidence = ref('')    // Confianza como texto (p.ej. "87%")
+
+// Barras de probabilidad por clase
+const trainedClassNames  = ref([])        // Nombres de las clases del modelo entrenado
+const classProbabilities = reactive({})   // { nombre_clase: { pct: 0..100 } }
+
+// Historial de las últimas predicciones (máximo 25 entradas)
+const predictionLog = ref([])
+
+// ─── Computed ─────────────────────────────────────────────────────────────────
+// Habilita el botón de entrenar solo cuando hay ≥ 2 clases con nombre y ≥ MIN_IMAGES_PER_CLASS imágenes
+const canTrain = computed(() => {
+  const namedClasses = classes.filter(c => c.name.trim())
+  return namedClasses.length >= 2 && namedClasses.every(c => c.imageCount >= MIN_IMAGES_PER_CLASS)
+})
+
+// ─── Gestión de clases ────────────────────────────────────────────────────────
+
+/** Añade una nueva clase al array reactivo con el siguiente color de la paleta. */
 function addClass() {
   classes.push({
-    id: nextId++,
-    name: '', imageCount: 0,
+    id: nextClassId++,
+    name: '',
+    imageCount: 0,
     color: PALETTE[classes.length % PALETTE.length],
-    cameraOn: false, capturing: false, capturePct: 0, captureMsg: '',
+    cameraOn: false,
+    capturing: false,
+    captureProgress: 0,
+    captureMessage: '',
+    captureTarget: MIN_IMAGES_PER_CLASS,
   })
 }
+
+/** Elimina la clase en la posición idx. No permite reducir a menos de 2 clases. */
 function removeClass(idx) {
   if (classes.length <= 2) return
-  const cls = classes[idx]
-  stopClassCamera(cls)
+  stopClassCamera(classes[idx])
   classes.splice(idx, 1)
 }
 
-// ─── Cámara por clase ─────────────────────────────────────────────────────
+// ─── Control de cámara por clase ─────────────────────────────────────────────
+
+/** Activa la cámara de una clase si estaba apagada, o la detiene si ya estaba encendida. */
 async function toggleCamera(cls) {
   if (cls.cameraOn) {
     stopClassCamera(cls)
@@ -71,153 +111,244 @@ async function toggleCamera(cls) {
   }
   try {
     const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 1280, height: 720 } })
-    streams[cls.id] = stream
+    cameraStreams[cls.id] = stream
     cls.cameraOn = true
-    await nextTick()
-    const el = videoEls[cls.id]
-    if (el) { el.srcObject = stream; await el.play().catch(() => {}) }
+    await nextTick()   // Esperar a que Vue renderice el elemento <video>
+    const videoEl = cameraElements[cls.id]
+    if (videoEl) {
+      videoEl.srcObject = stream
+      await videoEl.play().catch(() => {})
+    }
   } catch (err) {
     alert('No se pudo acceder a la cámara: ' + err.message)
   }
 }
+
+/** Detiene la cámara de una clase y libera el MediaStream del sistema operativo. */
 function stopClassCamera(cls) {
-  if (streams[cls.id]) { streams[cls.id].getTracks().forEach(t => t.stop()); delete streams[cls.id] }
-  if (videoEls[cls.id]) videoEls[cls.id].srcObject = null
+  if (cameraStreams[cls.id]) {
+    cameraStreams[cls.id].getTracks().forEach(track => track.stop())
+    delete cameraStreams[cls.id]
+  }
+  if (cameraElements[cls.id]) cameraElements[cls.id].srcObject = null
   cls.cameraOn = false
 }
 
-// ─── Captura de imágenes ──────────────────────────────────────────────────
-function frameToBase64(el) {
-  const c = document.createElement('canvas'); c.width = 224; c.height = 224
-  const ctx = c.getContext('2d')
-  const size = Math.min(el.videoWidth, el.videoHeight)
-  ctx.drawImage(el, (el.videoWidth - size) / 2, (el.videoHeight - size) / 2, size, size, 0, 0, 224, 224)
-  return c.toDataURL('image/jpeg', 0.85).split(',')[1]
+// ─── Captura de imágenes ──────────────────────────────────────────────────────
+
+/**
+ * Extrae un frame del elemento <video>, lo recorta a cuadrado centrado y
+ * lo devuelve como JPEG en Base64 (sin el prefijo data:image/...).
+ * El recorte cuadrado centrado mantiene la proporción correcta para MobileNetV2 (224×224).
+ */
+function frameToBase64(videoEl) {
+  const canvas = document.createElement('canvas')
+  canvas.width  = 224
+  canvas.height = 224
+  const ctx      = canvas.getContext('2d')
+  const cropSize = Math.min(videoEl.videoWidth, videoEl.videoHeight)
+  const offsetX  = (videoEl.videoWidth  - cropSize) / 2
+  const offsetY  = (videoEl.videoHeight - cropSize) / 2
+  ctx.drawImage(videoEl, offsetX, offsetY, cropSize, cropSize, 0, 0, 224, 224)
+  return canvas.toDataURL('image/jpeg', 0.85).split(',')[1]
 }
 
+/**
+ * Envía una imagen en Base64 al backend /upload para almacenarla en RAM
+ * asociada a la etiqueta de clase indicada.
+ */
+async function uploadImageToAPI(label, imageBase64) {
+  const response = await fetch(`${API}/upload`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ label, image_b64: imageBase64 }),
+  })
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}))
+    throw new Error(error.detail || `HTTP ${response.status}`)
+  }
+  return response.json()
+}
+
+/**
+ * Captura cls.captureTarget frames del video de la clase (mínimo MIN_IMAGES_PER_CLASS)
+ * y los sube uno a uno al backend. Actualiza la barra de progreso durante el proceso.
+ */
 async function captureImages(cls) {
-  if (!cls.cameraOn || !videoEls[cls.id]) { alert('Activa la cámara primero.'); return }
+  if (!cls.cameraOn || !cameraElements[cls.id]) { alert('Activa la cámara primero.'); return }
   if (!cls.name.trim()) { alert('Escribe el nombre de la clase primero.'); return }
-  const N = 15
-  cls.capturing  = true
-  cls.capturePct = 0
-  cls.captureMsg = ''
-  try {
-    for (let i = 0; i < N; i++) {
-      cls.captureMsg = `${i + 1} / ${N}`
-      cls.capturePct = Math.round(((i + 1) / N) * 100)
 
-      const b64 = frameToBase64(videoEls[cls.id])
-      const res = await fetch(`${API}/upload`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ label: cls.name.trim(), image_b64: b64 }),
-      })
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}))
-        throw new Error(err.detail || `HTTP ${res.status}`)
-      }
+  // Garantizar que nunca se capturen menos del mínimo requerido
+  const totalImages   = Math.max(MIN_IMAGES_PER_CLASS, cls.captureTarget)
+  cls.capturing       = true
+  cls.captureProgress = 0
+  cls.captureMessage  = ''
+
+  try {
+    for (let i = 0; i < totalImages; i++) {
+      cls.captureMessage  = `${i + 1} / ${totalImages}`
+      cls.captureProgress = Math.round(((i + 1) / totalImages) * 100)
+
+      const imageBase64 = frameToBase64(cameraElements[cls.id])
+      await uploadImageToAPI(cls.name.trim(), imageBase64)
       cls.imageCount++
-      await sleep(150)
+      await sleep(150)   // Pequeña pausa para que los frames capturados varíen ligeramente
     }
-    cls.captureMsg = '✅ Listo'
-    setTimeout(() => { cls.capturing = false; cls.captureMsg = '' }, 2000)
-  } catch (e) {
-    cls.captureMsg = `❌ Error: ${e.message}`
-    setTimeout(() => { cls.capturing = false; cls.captureMsg = '' }, 3000)
+    cls.captureMessage = '✅ Listo'
+    setTimeout(() => { cls.capturing = false; cls.captureMessage = '' }, 2000)
+  } catch (err) {
+    cls.captureMessage = `❌ Error: ${err.message}`
+    setTimeout(() => { cls.capturing = false; cls.captureMessage = '' }, 3000)
   }
 }
 
-// ─── Entrenamiento ────────────────────────────────────────────────────────
+// ─── Entrenamiento del modelo ─────────────────────────────────────────────────
+
+/**
+ * Envía una petición POST /train al backend con los hiperparámetros configurados.
+ * Actualiza la barra de progreso y, al completar, guarda los nombres de clase
+ * para inicializar las barras de probabilidad en la vista de predicción.
+ */
 async function trainModel() {
-  phase.value      = 'training'
-  trainRunning.value = true
-  trainDone.value    = false
-  trainPct.value     = 15
-  trainMsg.value     = 'Cargando MobileNetV2…'
+  appPhase.value         = 'training'
+  isTraining.value       = true
+  isTrainingComplete.value = false
+  trainingProgress.value = 15
+  trainingMessage.value  = 'Cargando MobileNetV2…'
 
   try {
-    trainPct.value = 35
-    trainMsg.value = 'Entrenando con Transfer Learning…'
+    trainingProgress.value = 35
+    trainingMessage.value  = 'Entrenando con Transfer Learning…'
 
-    const res  = await fetch(`${API}/train`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ epochs: 20, fine_tune: true }),
+    const response = await fetch(`${API}/train`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        epochs:        trainingConfig.epochs,
+        batch_size:    trainingConfig.batchSize,
+        learning_rate: trainingConfig.learningRate,
+        fine_tune:     true,
+      }),
     })
-    const data = await res.json()
-    if (!res.ok) throw new Error(data.detail || 'Error en entrenamiento')
+    const data = await response.json()
+    if (!response.ok) throw new Error(data.detail || 'Error en entrenamiento')
 
-    trainPct.value      = 100
-    trainMsg.value      = `Precisión: ${(data.val_accuracy * 100).toFixed(1)}%  ·  ${data.epochs_run} épocas`
-    trainAccuracy.value = data.val_accuracy
-    trainDone.value     = true
-    probClasses.value   = data.classes
-    data.classes.forEach(c => { probData[c] = { pct: 0 } })
-  } catch (e) {
-    trainMsg.value = '❌ ' + e.message
-    phase.value    = 'capture'
+    trainingProgress.value   = 100
+    trainingMessage.value    = `Precisión: ${(data.val_accuracy * 100).toFixed(1)}%  ·  ${data.epochs_run} épocas`
+    trainingAccuracy.value   = data.val_accuracy
+    isTrainingComplete.value = true
+    trainedClassNames.value  = data.classes
+
+    // Inicializar todas las barras de probabilidad a 0 hasta que el usuario prediga
+    data.classes.forEach(cls => { classProbabilities[cls] = { pct: 0 } })
+  } catch (err) {
+    trainingMessage.value = '❌ ' + err.message
+    appPhase.value        = 'capture'
   } finally {
-    trainRunning.value = false
+    isTraining.value = false
   }
 }
 
-// ─── Cámara de predicción ─────────────────────────────────────────────────
+// ─── Predicción en tiempo real ────────────────────────────────────────────────
+
+/** Inicia la cámara de predicción y arranca el intervalo de inferencia (cada 600 ms). */
 async function startPredictCamera() {
   try {
-    if (predictStream.value) predictStream.value.getTracks().forEach(t => t.stop())
+    if (predictCameraStream.value) predictCameraStream.value.getTracks().forEach(t => t.stop())
     const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 1280, height: 720 } })
-    predictStream.value = stream
+    predictCameraStream.value = stream
     await nextTick()
-    predictVideoEl.value.srcObject = stream
-    await predictVideoEl.value.play().catch(() => {})
-    predicting.value      = true
-    predictInterval.value = setInterval(predict, 600)
+    predictCameraEl.value.srcObject = stream
+    await predictCameraEl.value.play().catch(() => {})
+    isPredicting.value    = true
+    predictionTimer.value = setInterval(runPrediction, 600)
   } catch (err) {
     alert('No se pudo acceder a la cámara: ' + err.message)
   }
 }
-function stopPredict() {
-  clearInterval(predictInterval.value); predictInterval.value = null
-  if (predictStream.value) { predictStream.value.getTracks().forEach(t => t.stop()); predictStream.value = null }
-  predicting.value   = false
-  overlayLabel.value = '—'
-  overlayConf.value  = ''
+
+/** Detiene la cámara de predicción y limpia el intervalo de inferencia. */
+function stopPrediction() {
+  clearInterval(predictionTimer.value)
+  predictionTimer.value = null
+  if (predictCameraStream.value) {
+    predictCameraStream.value.getTracks().forEach(t => t.stop())
+    predictCameraStream.value = null
+  }
+  isPredicting.value        = false
+  predictedLabel.value      = '—'
+  predictedConfidence.value = ''
 }
 
-async function predict() {
-  if (!predictVideoEl.value) return
+/**
+ * Captura un frame de la cámara de predicción, lo envía al backend /predict
+ * y actualiza el overlay de resultado y las barras de probabilidad en tiempo real.
+ */
+async function runPrediction() {
+  if (!predictCameraEl.value) return
   try {
-    const res  = await fetch(`${API}/predict`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ image_b64: frameToBase64(predictVideoEl.value) }),
+    const response = await fetch(`${API}/predict`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ image_b64: frameToBase64(predictCameraEl.value) }),
     })
-    const data = await res.json()
-    if (!res.ok) return
-    overlayLabel.value = data.label
-    overlayConf.value  = `${(data.confidence * 100).toFixed(0)}%`
-    Object.entries(data.probabilities).forEach(([cls, p]) => {
-      if (probData[cls]) probData[cls].pct = +(p * 100).toFixed(1)
+    const data = await response.json()
+    if (!response.ok) return
+
+    predictedLabel.value      = data.label
+    predictedConfidence.value = `${(data.confidence * 100).toFixed(0)}%`
+
+    // Actualizar las barras de probabilidad para cada clase
+    Object.entries(data.probabilities).forEach(([cls, probability]) => {
+      if (classProbabilities[cls]) classProbabilities[cls].pct = +(probability * 100).toFixed(1)
     })
-    logLines.value.unshift(`[${new Date().toLocaleTimeString()}]  ${data.label}  ${(data.confidence * 100).toFixed(0)}%`)
-    if (logLines.value.length > 25) logLines.value.pop()
-  } catch (e) { /* ignorar errores de red */ }
+
+    // Registrar en el log (máximo 25 entradas, las más recientes primero)
+    predictionLog.value.unshift(
+      `[${new Date().toLocaleTimeString()}]  ${data.label}  ${(data.confidence * 100).toFixed(0)}%`
+    )
+    if (predictionLog.value.length > 25) predictionLog.value.pop()
+  } catch {
+    // Ignorar errores de red transitorios durante la predicción continua
+  }
 }
 
-// ─── Reiniciar todo ───────────────────────────────────────────────────────
+// ─── Reinicio total ───────────────────────────────────────────────────────────
+
+/**
+ * Detiene todas las cámaras activas, llama a /reset en el backend para limpiar la RAM
+ * y restablece todo el estado local al estado inicial de la aplicación.
+ */
 async function resetAll() {
-  stopPredict()
+  stopPrediction()
   classes.forEach(stopClassCamera)
   await fetch(`${API}/reset`, { method: 'DELETE' }).catch(() => {})
-  classes.forEach(c => { c.imageCount = 0; c.cameraOn = false; c.capturing = false; c.name = '' })
-  phase.value    = 'capture'
-  trainDone.value = false; trainPct.value = 0; trainMsg.value = ''
-  probClasses.value = []; logLines.value = []
+
+  classes.forEach(cls => {
+    cls.imageCount      = 0
+    cls.cameraOn        = false
+    cls.capturing       = false
+    cls.name            = ''
+    cls.captureProgress = 0
+    cls.captureMessage  = ''
+    cls.captureTarget   = MIN_IMAGES_PER_CLASS
+  })
+
+  appPhase.value           = 'capture'
+  isTrainingComplete.value = false
+  trainingProgress.value   = 0
+  trainingMessage.value    = ''
+  trainedClassNames.value  = []
+  predictionLog.value      = []
+  showTrainingSettings.value = false
 }
 
-// ─── Utils ────────────────────────────────────────────────────────────────
-function sleep(ms) { return new Promise(r => setTimeout(r, ms)) }
+// ─── Utilidades ───────────────────────────────────────────────────────────────
+function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)) }
 
+// Liberar todos los recursos de cámara al desmontar el componente (evitar memory leaks)
 onUnmounted(() => {
-  stopPredict()
+  stopPrediction()
   classes.forEach(stopClassCamera)
 })
 </script>
@@ -226,10 +357,68 @@ onUnmounted(() => {
   <div class="app">
 
     <Header />
-    <!-- ─── Layout de flujo ──────────────────────────────────────────────── -->
+
+    <!-- ─── Modal de configuración de hiperparámetros ─────────────────────── -->
+    <!-- Se abre al pulsar ⚙️ junto al botón de entrenar -->
+    <div
+      v-if="showTrainingSettings"
+      class="modal-overlay"
+      @click.self="showTrainingSettings = false"
+    >
+      <div class="modal-card">
+        <div class="modal-header">
+          <span class="modal-title">⚙️ Configuración de entrenamiento</span>
+          <button class="btn-icon remove" @click="showTrainingSettings = false" title="Cerrar">✕</button>
+        </div>
+
+        <div class="modal-body">
+          <!-- Épocas: número máximo de iteraciones completas sobre el dataset -->
+          <div class="config-row">
+            <label class="config-label">Épocas</label>
+            <input
+              type="number"
+              v-model.number="trainingConfig.epochs"
+              min="1" max="200"
+              class="config-input"
+            />
+            <span class="config-hint">Iteraciones completas sobre los datos (el early stopping puede detener antes)</span>
+          </div>
+
+          <!-- Tamaño de lote: imágenes procesadas por cada paso de gradiente -->
+          <div class="config-row">
+            <label class="config-label">Tamaño de lote</label>
+            <select v-model.number="trainingConfig.batchSize" class="config-select">
+              <option :value="8">8 — muy pequeño</option>
+              <option :value="16">16 — por defecto</option>
+              <option :value="32">32 — mediano</option>
+              <option :value="64">64 — grande</option>
+            </select>
+            <span class="config-hint">Imágenes procesadas por paso de gradiente</span>
+          </div>
+
+          <!-- Tasa de aprendizaje: velocidad de ajuste del optimizador Adam -->
+          <div class="config-row">
+            <label class="config-label">Tasa de aprendizaje</label>
+            <select v-model.number="trainingConfig.learningRate" class="config-select">
+              <option :value="0.01">0.01 — rápida</option>
+              <option :value="0.001">0.001 — media</option>
+              <option :value="0.0001">0.0001 — lenta (recomendada)</option>
+              <option :value="0.00001">0.00001 — muy lenta</option>
+            </select>
+            <span class="config-hint">Velocidad de ajuste de los pesos de la red</span>
+          </div>
+        </div>
+
+        <div class="modal-footer">
+          <button class="btn btn-success" @click="showTrainingSettings = false">✓ Guardar configuración</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ─── Layout de flujo horizontal ──────────────────────────────────────── -->
     <div class="flow-root">
 
-      <!-- COLUMNA IZQUIERDA: tarjetas de clase -->
+      <!-- COLUMNA IZQUIERDA: tarjetas de clase con cámara y captura -->
       <div class="col-classes">
         <div
           v-for="(cls, idx) in classes"
@@ -237,27 +426,27 @@ onUnmounted(() => {
           class="class-card"
           :style="{ '--accent': cls.color }"
         >
-          <!-- Título de clase -->
+          <!-- Cabecera: punto de color + nombre de la clase + botón eliminar -->
           <div class="card-header">
             <span class="dot" :style="{ background: cls.color }"></span>
             <input
               v-model="cls.name"
               class="name-input"
               placeholder="Nombre de la clase…"
-              :disabled="phase !== 'capture'"
+              :disabled="appPhase !== 'capture'"
             />
             <button
-              v-if="classes.length > 2 && phase === 'capture'"
+              v-if="classes.length > 2 && appPhase === 'capture'"
               class="btn-icon remove"
               @click="removeClass(idx)"
               title="Eliminar clase"
             >✕</button>
           </div>
 
-          <!-- Video de la clase -->
+          <!-- Previsualización de la cámara de la clase -->
           <div class="video-box">
             <video
-              :ref="el => { if (el) videoEls[cls.id] = el }"
+              :ref="el => { if (el) cameraElements[cls.id] = el }"
               autoplay muted playsinline
               class="class-video"
               :class="{ active: cls.cameraOn }"
@@ -268,59 +457,74 @@ onUnmounted(() => {
             </div>
           </div>
 
-          <!-- Acciones -->
+          <!-- Botones de acción: encender cámara, capturar, número de imágenes -->
           <div class="card-actions">
             <button
               class="btn"
               :class="cls.cameraOn ? 'btn-danger' : 'btn-info'"
-              :disabled="phase !== 'capture'"
+              :disabled="appPhase !== 'capture'"
               @click="toggleCamera(cls)"
             >
               {{ cls.cameraOn ? '⏹ Apagar' : '▶ Cámara' }}
             </button>
             <button
               class="btn btn-primary"
-              :disabled="!cls.cameraOn || cls.capturing || phase !== 'capture'"
+              :disabled="!cls.cameraOn || cls.capturing || appPhase !== 'capture'"
               @click="captureImages(cls)"
             >
-              📷 Capturar 15
+              📷 Capturar
             </button>
+            <!-- Input para elegir cuántas imágenes capturar (mínimo 15) -->
+            <input
+              type="number"
+              v-model.number="cls.captureTarget"
+              min="15"
+              max="500"
+              class="capture-count-input"
+              :disabled="cls.capturing || appPhase !== 'capture'"
+              title="Número de imágenes a capturar (mín. 15)"
+            />
           </div>
 
-          <!-- Progreso de captura -->
+          <!-- Barra de progreso durante una captura activa -->
           <div v-if="cls.capturing" class="capture-progress">
-            <span class="cap-msg">{{ cls.captureMsg }}</span>
-            <div class="pbar"><div class="pfill" :style="{ width: cls.capturePct + '%', background: cls.color }"></div></div>
+            <span class="cap-msg">{{ cls.captureMessage }}</span>
+            <div class="pbar">
+              <div class="pfill" :style="{ width: cls.captureProgress + '%', background: cls.color }"></div>
+            </div>
           </div>
 
-          <!-- Contador -->
+          <!-- Contador de imágenes con indicador de si supera el mínimo -->
           <div class="img-count" :style="{ color: cls.color }">
             {{ cls.imageCount }} imágenes
-            <span v-if="cls.imageCount >= 5" style="color:#86efac"> ✓</span>
-            <span v-else style="color:#888"> (mín. 5)</span>
+            <span v-if="cls.imageCount >= 15" style="color:#86efac"> ✓</span>
+            <span v-else style="color:#888"> (mín. 15)</span>
           </div>
         </div>
 
-        <!-- Botón añadir clase -->
+        <!-- Botón para añadir una nueva clase de entrenamiento -->
         <button
-          v-if="phase === 'capture'"
+          v-if="appPhase === 'capture'"
           class="btn btn-ghost add-class-btn"
           @click="addClass"
         >+ Añadir clase</button>
       </div>
 
-      <!-- Conector izquierda → centro -->
+      <!-- Conector visual izquierda → centro -->
       <div class="connector">
         <div class="connector-line"></div>
         <div class="connector-arrow">▶</div>
       </div>
 
-      <!-- COLUMNA CENTRAL: entrenamiento -->
+      <!-- COLUMNA CENTRAL: panel de entrenamiento -->
       <div class="center-card">
         <div class="center-card-title">🧠 Entrenamiento</div>
 
-        <div v-if="phase === 'capture'" class="train-summary">
+        <!-- Vista de captura: resumen de clases + botones de entrenar y configurar -->
+        <div v-if="appPhase === 'capture'" class="train-summary">
           <p class="hint">Captura imágenes de tus clases y luego entrena el modelo.</p>
+
+          <!-- Resumen compacto: clase → número de imágenes capturadas -->
           <div class="class-summary">
             <div v-for="cls in classes" :key="cls.id" class="summary-row">
               <span class="dot" :style="{ background: cls.color }"></span>
@@ -328,82 +532,107 @@ onUnmounted(() => {
               <span class="summary-count" :style="{ color: cls.color }">{{ cls.imageCount }} imgs</span>
             </div>
           </div>
-          <button
-            class="btn btn-success train-btn"
-            :disabled="!canTrain"
-            @click="trainModel"
-          >🚀 Entrenar modelo</button>
-          <p v-if="!canTrain" class="hint-warn">Necesitas ≥ 2 clases con ≥ 5 imágenes cada una.</p>
+
+          <!-- Botón de entrenar + engranaje de configuración en la misma fila -->
+          <div class="train-actions">
+            <button
+              class="btn btn-success train-btn"
+              :disabled="!canTrain"
+              @click="trainModel"
+            >🚀 Entrenar modelo</button>
+            <button
+              class="btn btn-ghost settings-btn"
+              @click="showTrainingSettings = true"
+              title="Configurar épocas, tamaño de lote y tasa de aprendizaje"
+            >⚙️</button>
+          </div>
+          <p v-if="!canTrain" class="hint-warn">
+            Necesitas ≥ 2 clases con ≥ 15 imágenes cada una.
+          </p>
+
+          <!-- Botón de reinicio total (limpia cámaras, imágenes y modelo) -->
+          <button class="btn btn-outline-danger reset-btn" @click="resetAll">
+            🗑️ Reiniciar todo
+          </button>
         </div>
 
+        <!-- Vista de progreso / resultado del entrenamiento -->
         <div v-else class="train-progress-block">
-          <div class="big-pct" :class="{ done: trainDone }">{{ trainPct }}%</div>
-          <div class="pbar"><div class="pfill accent" :style="{ width: trainPct + '%' }"></div></div>
-          <p class="train-msg">{{ trainMsg }}</p>
+          <div class="big-pct" :class="{ done: isTrainingComplete }">{{ trainingProgress }}%</div>
+          <div class="pbar"><div class="pfill accent" :style="{ width: trainingProgress + '%' }"></div></div>
+          <p class="train-msg">{{ trainingMessage }}</p>
 
-          <div v-if="trainDone" class="accuracy-badge">
-            ✅ Precisión: <strong>{{ (trainAccuracy * 100).toFixed(1) }}%</strong>
+          <!-- Insignia con la precisión de validación final -->
+          <div v-if="isTrainingComplete" class="accuracy-badge">
+            ✅ Precisión: <strong>{{ (trainingAccuracy * 100).toFixed(1) }}%</strong>
           </div>
 
-          <div v-if="trainDone" class="prob-list">
-            <div v-for="cls in probClasses" :key="cls" class="prob-row">
+          <!-- Barras de probabilidad por clase (se actualizan al predecir) -->
+          <div v-if="isTrainingComplete" class="prob-list">
+            <div v-for="cls in trainedClassNames" :key="cls" class="prob-row">
               <span class="prob-label">{{ cls }}</span>
-              <div class="pbar"><div class="pfill accent" :style="{ width: probData[cls]?.pct + '%' }"></div></div>
-              <span class="prob-val">{{ probData[cls]?.pct ?? 0 }}%</span>
+              <div class="pbar"><div class="pfill accent" :style="{ width: classProbabilities[cls]?.pct + '%' }"></div></div>
+              <span class="prob-val">{{ classProbabilities[cls]?.pct ?? 0 }}%</span>
             </div>
           </div>
+
+          <!-- Botón de reinicio también disponible tras el entrenamiento -->
+          <button class="btn btn-outline-danger reset-btn" style="margin-top:1rem" @click="resetAll">
+            🗑️ Reiniciar todo
+          </button>
         </div>
       </div>
 
-      <!-- Conector centro → derecha -->
-      <div class="connector" :class="{ dimmed: !trainDone }">
+      <!-- Conector visual centro → derecha (atenuado hasta que haya modelo listo) -->
+      <div class="connector" :class="{ dimmed: !isTrainingComplete }">
         <div class="connector-line"></div>
         <div class="connector-arrow">▶</div>
       </div>
 
-      <!-- COLUMNA DERECHA: resultado en tiempo real -->
-      <div class="result-card" :class="{ dimmed: !trainDone }">
+      <!-- COLUMNA DERECHA: resultado de predicción en tiempo real -->
+      <div class="result-card" :class="{ dimmed: !isTrainingComplete }">
         <div class="center-card-title">👁️ Resultado en tiempo real</div>
 
-        <div v-if="!trainDone" class="result-waiting">
+        <!-- Mensaje de espera si el modelo todavía no está entrenado -->
+        <div v-if="!isTrainingComplete" class="result-waiting">
           <span>Entrena el modelo primero</span>
         </div>
 
         <template v-else>
-          <!-- Video de predicción -->
+          <!-- Video con overlay que muestra la clase predicha y la confianza -->
           <div class="predict-video-box">
             <video
-              ref="predictVideoEl"
+              ref="predictCameraEl"
               autoplay muted playsinline
               class="predict-video"
             ></video>
-            <div v-if="predicting" class="predict-overlay">
-              <span class="pred-label">{{ overlayLabel }}</span>
-              <span class="pred-conf">{{ overlayConf }}</span>
+            <div v-if="isPredicting" class="predict-overlay">
+              <span class="pred-label">{{ predictedLabel }}</span>
+              <span class="pred-conf">{{ predictedConfidence }}</span>
             </div>
-            <div v-if="!predicting" class="video-placeholder">
+            <div v-if="!isPredicting" class="video-placeholder">
               <span>👁️</span><small>Sin cámara</small>
             </div>
           </div>
 
-          <!-- Controles -->
+          <!-- Controles de predicción -->
           <div class="card-actions">
-            <button class="btn btn-info"   :disabled="predicting"  @click="startPredictCamera">▶ Iniciar</button>
-            <button class="btn btn-danger" :disabled="!predicting" @click="stopPredict">⏹ Detener</button>
+            <button class="btn btn-info"   :disabled="isPredicting"  @click="startPredictCamera">▶ Iniciar</button>
+            <button class="btn btn-danger" :disabled="!isPredicting" @click="stopPrediction">⏹ Detener</button>
           </div>
 
-          <!-- Barras de probabilidad -->
-          <div v-if="probClasses.length" class="prob-list" style="margin-top:0.8rem">
-            <div v-for="cls in probClasses" :key="cls" class="prob-row">
+          <!-- Barras de probabilidad actualizadas en tiempo real -->
+          <div v-if="trainedClassNames.length" class="prob-list" style="margin-top:0.8rem">
+            <div v-for="cls in trainedClassNames" :key="cls" class="prob-row">
               <span class="prob-label">{{ cls }}</span>
-              <div class="pbar"><div class="pfill accent" :style="{ width: probData[cls]?.pct + '%' }"></div></div>
-              <span class="prob-val">{{ probData[cls]?.pct ?? 0 }}%</span>
+              <div class="pbar"><div class="pfill accent" :style="{ width: classProbabilities[cls]?.pct + '%' }"></div></div>
+              <span class="prob-val">{{ classProbabilities[cls]?.pct ?? 0 }}%</span>
             </div>
           </div>
 
-          <!-- Log -->
-          <div class="log-box" v-if="logLines.length">
-            <div v-for="(l, i) in logLines" :key="i" class="log-line">{{ l }}</div>
+          <!-- Log de predicciones recientes con timestamp -->
+          <div class="log-box" v-if="predictionLog.length">
+            <div v-for="(entry, i) in predictionLog" :key="i" class="log-line">{{ entry }}</div>
           </div>
         </template>
       </div>
@@ -421,6 +650,88 @@ onUnmounted(() => {
   background: #ffffff;
   color: #1a1a1a;
   min-height: 100vh;
+}
+
+/* ─── Modal overlay ───────────────────────────────────────────────────────── */
+/* Fondo semitransparente que cubre toda la pantalla al abrir el modal */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.modal-card {
+  background: #fff;
+  border: 2px solid #55a472;
+  border-radius: 16px;
+  padding: 1.5rem;
+  min-width: 340px;
+  max-width: 440px;
+  width: 90%;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.25);
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 1.2rem;
+}
+
+.modal-title {
+  font-size: 1rem;
+  font-weight: 700;
+  color: #1a3a26;
+}
+
+.modal-body {
+  display: flex;
+  flex-direction: column;
+  gap: 1.1rem;
+}
+
+.modal-footer {
+  margin-top: 1.4rem;
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* ─── Filas de configuración dentro del modal ────────────────────────────── */
+.config-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.config-label {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: #1a3a26;
+}
+
+.config-input,
+.config-select {
+  padding: 0.45rem 0.6rem;
+  border: 1.5px solid #b7dfbb;
+  border-radius: 8px;
+  font-size: 0.88rem;
+  color: #1a1a1a;
+  background: #f0faf2;
+  outline: none;
+  width: 100%;
+  font-family: 'Montserrat', sans-serif;
+}
+
+.config-input:focus,
+.config-select:focus { border-color: #55a472; }
+
+.config-hint {
+  font-size: 0.75rem;
+  color: #666;
 }
 
 /* ─── Barra de acciones ───────────────────────────────────────────────────── */
@@ -452,7 +763,7 @@ onUnmounted(() => {
   flex-direction: column;
   gap: 1.2rem;
   min-width: 320px;
-  max-width: 360px;
+  max-width: 380px;
   flex-shrink: 0;
 }
 
@@ -473,9 +784,11 @@ onUnmounted(() => {
   align-items: center;
   gap: 0.5rem;
 }
+
 .dot {
   width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0;
 }
+
 .name-input {
   flex: 1;
   background: #fff;
@@ -487,6 +800,7 @@ onUnmounted(() => {
   outline: none;
 }
 .name-input:focus { border-color: var(--accent, #7c3aed); }
+
 .btn-icon.remove {
   background: none; border: none; cursor: pointer;
   color: #dc2626; font-size: 1rem; padding: 0.1rem 0.3rem;
@@ -501,6 +815,7 @@ onUnmounted(() => {
   aspect-ratio: 4/3;
   width: 100%;
 }
+
 .class-video {
   width: 100%; height: 100%;
   object-fit: cover;
@@ -521,8 +836,24 @@ onUnmounted(() => {
 
 /* ─── Acciones de la tarjeta ─────────────────────────────────────────────── */
 .card-actions {
-  display: flex; gap: 0.5rem; flex-wrap: wrap;
+  display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center;
 }
+
+/* Input para elegir cuántas imágenes capturar (mínimo 15) */
+.capture-count-input {
+  width: 64px;
+  padding: 0.44rem 0.4rem;
+  border: 1.5px solid #b7dfbb;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  text-align: center;
+  background: #f0faf2;
+  color: #1a1a1a;
+  outline: none;
+  font-family: 'Montserrat', sans-serif;
+}
+.capture-count-input:focus    { border-color: #55a472; }
+.capture-count-input:disabled { opacity: 0.4; }
 
 /* ─── Barra de captura ───────────────────────────────────────────────────── */
 .capture-progress { display: flex; flex-direction: column; gap: 0.3rem; }
@@ -586,7 +917,18 @@ onUnmounted(() => {
 .summary-name    { flex: 1; }
 .summary-count   { font-weight: 700; }
 
-.train-btn  { width: 100%; justify-content: center; margin-top: 0.5rem; }
+/* Fila con botón de entrenar + engranaje de configuración */
+.train-actions {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  margin-top: 0.5rem;
+}
+.train-btn    { flex: 1; justify-content: center; }
+.settings-btn { flex-shrink: 0; font-size: 1rem; padding: 0.5rem 0.7rem; }
+
+/* Botón de reinicio al pie del panel central */
+.reset-btn { width: 100%; justify-content: center; margin-top: 0.8rem; }
 
 .big-pct {
   font-size: 3rem; font-weight: 800; text-align: center;
@@ -651,7 +993,7 @@ onUnmounted(() => {
 .prob-label { width: 90px; text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: #1a1a1a; }
 .prob-val   { width: 38px; text-align: right; font-weight: 700; color: #065f46; }
 
-/* ─── Log ────────────────────────────────────────────────────────────────── */
+/* ─── Log de predicciones ────────────────────────────────────────────────── */
 .log-box {
   margin-top: 0.7rem;
   background: #0f0f20; border-radius: 8px; padding: 0.6rem;
@@ -667,14 +1009,22 @@ onUnmounted(() => {
 .pfill.accent { background: #2d6a4f; }
 
 /* ─── Botones ─────────────────────────────────────────────────────────────── */
-button { padding: 0.5rem 1rem; border-radius: 8px; border: none; cursor: pointer;
-  font-size: 0.88rem; font-weight: 600; transition: opacity 0.2s; }
+button {
+  padding: 0.5rem 1rem; border-radius: 8px; border: none; cursor: pointer;
+  font-size: 0.88rem; font-weight: 600; transition: opacity 0.2s;
+}
 button:hover    { opacity: 0.85; }
 button:disabled { opacity: 0.35; cursor: not-allowed; }
-.btn-primary { background: #7c3aed; color: #fff; }
-.btn-success { background: #059669; color: #fff; }
-.btn-danger  { background: #dc2626; color: #fff; }
-.btn-info    { background: #0369a1; color: #fff; }
-.btn-ghost   { background: rgba(0,0,0,0.04); color: #555; border: 1px solid #ccc; }
-</style>
 
+.btn-primary      { background: #7c3aed; color: #fff; }
+.btn-success      { background: #059669; color: #fff; }
+.btn-danger       { background: #dc2626; color: #fff; }
+.btn-info         { background: #0369a1; color: #fff; }
+.btn-ghost        { background: rgba(0,0,0,0.04); color: #555; border: 1px solid #ccc; }
+.btn-outline-danger {
+  background: transparent;
+  color: #dc2626;
+  border: 1.5px solid #dc2626;
+}
+.btn-outline-danger:hover { background: rgba(220,38,38,0.06); }
+</style>

@@ -231,14 +231,16 @@ class DQNAgent:
         """
         Construye la red densa del DQN.
 
-        Capa 1: Dense(256, relu) — procesa el estado de 11 dimensiones.
-        Capa 2: Dense(128, relu) — comprime la representación interna.
-        Capa 3: Dense(4, linear) — produce los Q-values para cada acción.
+        Capa 1: Input(11) — define la forma de entrada.
+        Capa 2: Dense(256, relu) — procesa el estado de 11 dimensiones.
+        Capa 3: Dense(128, relu) — comprime la representación interna.
+        Capa 4: Dense(4, linear) — produce los Q-values para cada acción.
 
         Se usa MSE como pérdida porque estamos regresando Q-values continuos.
         """
         model = models.Sequential([
-            layers.Dense(256, activation="relu", input_shape=(self.state_size,)),
+            layers.Input(shape=(self.state_size,)),
+            layers.Dense(256, activation="relu"),
             layers.Dense(128, activation="relu"),
             layers.Dense(self.action_size, activation="linear"),
         ])
@@ -253,11 +255,19 @@ class DQNAgent:
         Elige una acción usando la estrategia epsilon-greedy.
           - Con probabilidad epsilon → acción aleatoria (exploración).
           - Con probabilidad (1 - epsilon) → acción con mayor Q-value (explotación).
+        Usa model() directo en lugar de model.predict() para evitar overhead.
         """
         if random.random() < self.epsilon:
             return random.randint(0, self.action_size - 1)
-        q_values = self.model.predict(np.array([state]), verbose=0)[0]
+        state_tensor = tf.constant([state], dtype=tf.float32)
+        q_values = self.model(state_tensor, training=False).numpy()[0]
         return int(np.argmax(q_values))
+
+    def act_greedy(self, state: list[float]) -> tuple[int, list[float]]:
+        """Acción sin exploración (para jugar). Devuelve (acción, q_values)."""
+        state_tensor = tf.constant([state], dtype=tf.float32)
+        q_values = self.model(state_tensor, training=False).numpy()[0]
+        return int(np.argmax(q_values)), q_values.tolist()
 
     def remember(
         self,
@@ -273,15 +283,7 @@ class DQNAgent:
     def train_step(self) -> float:
         """
         Realiza un paso de entrenamiento con un mini-batch aleatorio del buffer.
-
-        Algoritmo:
-          1. Muestrear BATCH_SIZE transiciones aleatorias de la memoria.
-          2. Para cada transición, calcular el Q-target:
-             - Si done: target = reward
-             - Si no:   target = reward + gamma * max(Q_target(s'))
-          3. Actualizar solo el Q-value de la acción tomada, dejando los demás intactos.
-          4. Entrenar la red principal con MSE entre Q-predichos y Q-targets.
-          5. Decaer epsilon para reducir exploración gradualmente.
+        Usa model() directo en lugar de predict() para mayor velocidad.
 
         Retorna la pérdida (loss) del paso de entrenamiento.
         """
@@ -289,12 +291,12 @@ class DQNAgent:
             return 0.0
 
         batch = random.sample(self.memory, self.batch_size)
-        states = np.array([t[0] for t in batch])
-        next_states = np.array([t[3] for t in batch])
+        states = np.array([t[0] for t in batch], dtype=np.float32)
+        next_states = np.array([t[3] for t in batch], dtype=np.float32)
 
-        # Predecir Q-values actuales y futuros en batch (eficiente)
-        current_qs = self.model.predict(states, verbose=0)
-        future_qs = self.target_model.predict(next_states, verbose=0)
+        # Predecir Q-values actuales y futuros en batch usando model() directo
+        current_qs = self.model(tf.constant(states), training=False).numpy()
+        future_qs = self.target_model(tf.constant(next_states), training=False).numpy()
 
         # Actualizar los Q-targets para las acciones tomadas
         for i, (_, action, reward, _, done) in enumerate(batch):
@@ -403,31 +405,26 @@ def snake_train(req: TrainRequest):
 
     for episode in range(req.episodes):
         current_state = game.reset()
-        total_loss = 0.0
-        steps = 0
         done = False
 
+        # Jugar un episodio completo (solo recoger experiencia, rápido)
         while not done:
             action = agent.act(current_state)
             result = game.step(action)
-            next_state = result["state"]
-            reward = result["reward"]
+            agent.remember(current_state, action, result["reward"], result["state"], result["done"])
+            current_state = result["state"]
             done = result["done"]
 
-            agent.remember(current_state, action, reward, next_state, done)
-            loss = agent.train_step()
-            total_loss += loss
-            steps += 1
-            current_state = next_state
+        # Entrenar UNA VEZ al final del episodio (no cada paso)
+        loss = agent.train_step()
 
         # Registrar métricas del episodio
         score = game.score
         episode_scores.append(score)
-        avg_loss = total_loss / max(steps, 1)
-        episode_losses.append(round(avg_loss, 6))
+        episode_losses.append(round(loss, 6))
 
         state.scores_history.append(score)
-        state.loss_history.append(round(avg_loss, 6))
+        state.loss_history.append(round(loss, 6))
 
         # Media móvil de los últimos 100 episodios
         window = state.scores_history[-100:]
@@ -473,14 +470,14 @@ def snake_predict(payload: PredictPayload):
     if len(payload.state) != STATE_SIZE:
         raise HTTPException(400, f"El estado debe tener {STATE_SIZE} valores, recibidos: {len(payload.state)}")
 
-    q_values = state.agent.model.predict(np.array([payload.state]), verbose=0)[0]
-    action = int(np.argmax(q_values))
+    action, q_values_list = state.agent.act_greedy(payload.state)
     action_names = ["arriba", "derecha", "abajo", "izquierda"]
+    q_values = q_values_list
 
     return {
         "action": action,
         "action_name": action_names[action],
-        "q_values": {name: round(float(q), 4) for name, q in zip(action_names, q_values)},
+        "q_values": {name: round(float(q), 4) for name, q in zip(action_names, q_values_list)},
     }
 
 
@@ -501,8 +498,7 @@ def snake_play(req: PlayRequest):
     done = False
     while not done:
         # Acción sin exploración (epsilon = 0 para jugar)
-        q_values = state.agent.model.predict(np.array([current_state]), verbose=0)[0]
-        action = int(np.argmax(q_values))
+        action, _ = state.agent.act_greedy(current_state)
 
         frames.append({
             "snake": [dict(s) for s in game.snake],
@@ -536,12 +532,6 @@ def snake_play(req: PlayRequest):
 @app.delete("/snake/reset")
 def snake_reset():
     """Elimina el agente entrenado y reinicia todas las métricas."""
-    if state.agent is not None:
-        # Liberar memoria de TensorFlow
-        del state.agent.model
-        del state.agent.target_model
-        del state.agent
-
     state.agent = None
     state.episodes_trained = 0
     state.best_score = 0

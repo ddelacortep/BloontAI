@@ -25,49 +25,79 @@ const game = reactive({
 const isTraining = ref(false)
 const isPlaying = ref(false)
 const isPaused = ref(false)
+const isLoading = ref(false)
 const episode = ref(0)
 const currentScore = ref(0)
 const bestScore = ref(0)
 const epsilon = ref(1)
 const scores = ref([])
 const speed = ref(50)
-const trainBatch = ref(50) // episodios por lote de entrenamiento
+const trainBatch = ref(10) // episodios por lote de entrenamiento
+const statusText = ref('')
 
 async function startTraining() {
   if (isTraining.value) return
   isTraining.value = true
   isPaused.value = false
+  statusText.value = 'Reseteando agente...'
 
-  // Resetear agente en el backend
-  await fetch(`${API}/snake/reset`, { method: 'DELETE' })
-  episode.value = 0
-  scores.value = []
-  bestScore.value = 0
+  try {
+    // Resetear agente en el backend
+    await fetch(`${API}/snake/reset`, { method: 'DELETE' })
+    episode.value = 0
+    scores.value = []
+    bestScore.value = 0
 
-  await runTrainingLoop()
+    await runTrainingLoop()
+  } catch (e) {
+    console.error('Error en startTraining:', e)
+    statusText.value = 'Error: ' + e.message
+    isTraining.value = false
+  }
 }
 
 async function runTrainingLoop() {
   while (isTraining.value) {
     if (isPaused.value) { await sleep(200); continue }
 
-    // Entrenar un lote de episodios en el backend
-    const res = await fetch(`${API}/snake/train`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ episodes: trainBatch.value, grid_size: GRID }),
-    })
-    const data = await res.json()
+    try {
+      isLoading.value = true
+      statusText.value = `Entrenando ${trainBatch.value} episodios...`
 
-    // Actualizar métricas desde la respuesta del backend
-    episode.value = data.episodes_trained
-    bestScore.value = data.best_score
-    epsilon.value = data.epsilon
-    scores.value = [...scores.value, ...data.last_scores]
-    currentScore.value = data.last_scores[data.last_scores.length - 1] ?? 0
+      // Entrenar un lote de episodios en el backend
+      const res = await fetch(`${API}/snake/train`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ episodes: trainBatch.value, grid_size: GRID }),
+      })
 
-    // Reproducir una partida para visualizar el progreso
-    await playOneGame()
+      if (!res.ok) {
+        const err = await res.text()
+        console.error('Error /snake/train:', err)
+        statusText.value = 'Error en entrenamiento'
+        break
+      }
+
+      const data = await res.json()
+      isLoading.value = false
+
+      // Actualizar métricas desde la respuesta del backend
+      episode.value = data.episodes_trained
+      bestScore.value = data.best_score
+      epsilon.value = data.epsilon
+      scores.value = [...scores.value, ...data.last_scores]
+      currentScore.value = data.last_scores[data.last_scores.length - 1] ?? 0
+
+      // Reproducir una partida para visualizar el progreso
+      statusText.value = 'Reproduciendo partida de la IA...'
+      await playOneGame()
+      statusText.value = ''
+    } catch (e) {
+      console.error('Error en runTrainingLoop:', e)
+      statusText.value = 'Error: ' + e.message
+      isLoading.value = false
+      break
+    }
   }
 }
 
@@ -162,6 +192,12 @@ function sleep(ms) { return new Promise(r => setTimeout(r, ms)) }
                 <span class="stat-label">Epsilon (ε)</span>
                 <span class="stat-value">{{ epsilon }}</span>
               </div>
+            </div>
+
+            <!-- Status -->
+            <div v-if="statusText" class="status-bar">
+              <span class="spinner" v-if="isLoading">⏳</span>
+              {{ statusText }}
             </div>
 
             <!-- Velocidad -->
@@ -293,6 +329,15 @@ function sleep(ms) { return new Promise(r => setTimeout(r, ms)) }
 .stat-label { display: block; font-size: 0.7rem; color: #666; text-transform: uppercase; letter-spacing: 0.5px; }
 .stat-value { display: block; font-size: 1.3rem; font-weight: 700; color: #1B512D; }
 .stat-value.highlight { color: #B1CF5F; }
+
+/* Status */
+.status-bar {
+  background: #fef9c3; color: #854d0e; padding: 0.5rem 1rem;
+  border-radius: 10px; font-size: 0.85rem; font-weight: 600;
+  text-align: center; width: 100%; max-width: 400px;
+}
+.spinner { animation: spin 1s linear infinite; display: inline-block; }
+@keyframes spin { to { transform: rotate(360deg); } }
 
 /* Speed */
 .speed-control { width: 100%; max-width: 400px; text-align: center; }

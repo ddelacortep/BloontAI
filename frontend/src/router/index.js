@@ -35,6 +35,11 @@ const router = createRouter({
             path: "/modelo-texto",
             name: "modelo-texto",
             component: ModeloTexto,
+        },
+        {
+            path: "/modelo-video",
+            name: "modelo-video",
+            component: ModeloVideo,
         }
     ]
 });

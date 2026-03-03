@@ -2,6 +2,7 @@ import { createRouter, createWebHistory } from "vue-router";
 import HomeView from "../views/HomeView.vue";
 import ModeloImagenes from "../views/ModeloImagenes.vue";
 import ModeloVideo from "../views/ModeloVideo.vue";
+import ModeloAudio from "../views/ModeloAudio.vue";
 import SeleccionModelo from "@/views/SeleccionModelo.vue";
 
 
@@ -18,6 +19,11 @@ const router = createRouter({
             path: "/modelo-imagenes",
             name: "modelo-imagenes",
             component: ModeloImagenes,
+        },
+        {
+            path: "/modelo-audio",
+            name: "modelo-audio",
+            component: ModeloAudio,
         },
         {
             path: "/seleccion-modelo",

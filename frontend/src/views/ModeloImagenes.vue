@@ -44,6 +44,7 @@ const trainingMessage    = ref('')      // Texto de estado que se muestra al usu
 const trainingProgress   = ref(0)       // Porcentaje de progreso visual (0–100)
 const isTrainingComplete = ref(false)   // True cuando el entrenamiento ha concluido con éxito
 const trainingAccuracy   = ref(null)    // Precisión en validación devuelta por el backend
+const isExporting        = ref(false)   // True mientras el ZIP se está generando/descargando
 
 // ─── Configuración de hiperparámetros (modal de ajustes) ──────────────────────
 const showTrainingSettings = ref(false)   // Controla si el modal de configuración es visible
@@ -246,6 +247,38 @@ async function trainModel() {
     appPhase.value        = 'capture'
   } finally {
     isTraining.value = false
+  }
+}
+
+// ─── Exportación del modelo ───────────────────────────────────────────────────
+
+/**
+ * Solicita al backend el ZIP con el modelo exportado y lo descarga en el browser.
+ * Usa un <a> temporal con URL.createObjectURL para disparar la descarga sin abrir
+ * una nueva pestaña ni redirigir la página.
+ */
+async function exportModel() {
+  if (isExporting.value) return
+  isExporting.value = true
+  try {
+    const response = await fetch(`${API}/export`)
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}))
+      throw new Error(error.detail || `HTTP ${response.status}`)
+    }
+    const blob = await response.blob()
+    const url  = URL.createObjectURL(blob)
+    const a    = document.createElement('a')
+    a.href     = url
+    a.download = 'modelo_exportado.zip'
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+  } catch (err) {
+    alert('❌ Error al exportar: ' + err.message)
+  } finally {
+    isExporting.value = false
   }
 }
 

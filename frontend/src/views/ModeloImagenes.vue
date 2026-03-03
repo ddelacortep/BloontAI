@@ -44,7 +44,6 @@ const trainingMessage    = ref('')      // Texto de estado que se muestra al usu
 const trainingProgress   = ref(0)       // Porcentaje de progreso visual (0–100)
 const isTrainingComplete = ref(false)   // True cuando el entrenamiento ha concluido con éxito
 const trainingAccuracy   = ref(null)    // Precisión en validación devuelta por el backend
-const isExporting        = ref(false)   // True mientras el ZIP se está generando/descargando
 
 // ─── Configuración de hiperparámetros (modal de ajustes) ──────────────────────
 const showTrainingSettings = ref(false)   // Controla si el modal de configuración es visible
@@ -247,38 +246,6 @@ async function trainModel() {
     appPhase.value        = 'capture'
   } finally {
     isTraining.value = false
-  }
-}
-
-// ─── Exportación del modelo ───────────────────────────────────────────────────
-
-/**
- * Solicita al backend el ZIP con el modelo exportado y lo descarga en el browser.
- * Usa un <a> temporal con URL.createObjectURL para disparar la descarga sin abrir
- * una nueva pestaña ni redirigir la página.
- */
-async function exportModel() {
-  if (isExporting.value) return
-  isExporting.value = true
-  try {
-    const response = await fetch(`${API}/export`)
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({}))
-      throw new Error(error.detail || `HTTP ${response.status}`)
-    }
-    const blob = await response.blob()
-    const url  = URL.createObjectURL(blob)
-    const a    = document.createElement('a')
-    a.href     = url
-    a.download = 'modelo_exportado.zip'
-    document.body.appendChild(a)
-    a.click()
-    document.body.removeChild(a)
-    URL.revokeObjectURL(url)
-  } catch (err) {
-    alert('❌ Error al exportar: ' + err.message)
-  } finally {
-    isExporting.value = false
   }
 }
 
@@ -599,17 +566,6 @@ onUnmounted(() => {
           <div v-if="isTrainingComplete" class="accuracy-badge">
             ✅ Precisión: <strong>{{ (trainingAccuracy * 100).toFixed(1) }}%</strong>
           </div>
-
-          <!-- Botón de exportación del modelo entrenado -->
-          <button
-            v-if="isTrainingComplete"
-            class="btn btn-export"
-            :disabled="isExporting"
-            @click="exportModel"
-            style="width:100%; margin-top:0.6rem; justify-content:center;"
-          >
-            {{ isExporting ? '⏳ Exportando…' : '📥 Exportar modelo' }}
-          </button>
 
           <!-- Barras de probabilidad por clase (se actualizan al predecir) -->
           <div v-if="isTrainingComplete" class="prob-list">
@@ -1071,10 +1027,4 @@ button:disabled { opacity: 0.35; cursor: not-allowed; }
   border: 1.5px solid #dc2626;
 }
 .btn-outline-danger:hover { background: rgba(220,38,38,0.06); }
-
-.btn-export {
-  background: #1B512D;
-  color: #fff;
-}
-.btn-export:hover:not(:disabled) { background: #2d6a4f; }
 </style>

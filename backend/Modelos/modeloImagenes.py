@@ -16,6 +16,11 @@ from __future__ import annotations
 
 import io
 import base64
+import json
+import os
+import shutil
+import tempfile
+import zipfile
 import numpy as np
 from collections import defaultdict
 from typing import Optional
@@ -29,6 +34,13 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from PIL import Image
+
+# Detección opcional de tensorflowjs (puede no estar instalado por sus deps pesadas: jax, flax)
+try:
+    import tensorflowjs as tfjs
+    _HAS_TFJS = True
+except ImportError:
+    _HAS_TFJS = False
 
 # ─── Configuración por defecto ────────────────────────────────────────────────
 IMG_SIZE      = (224, 224)   # Tamaño de entrada requerido por MobileNetV2

@@ -600,6 +600,17 @@ onUnmounted(() => {
             ✅ Precisión: <strong>{{ (trainingAccuracy * 100).toFixed(1) }}%</strong>
           </div>
 
+          <!-- Botón de exportación del modelo entrenado -->
+          <button
+            v-if="isTrainingComplete"
+            class="btn btn-export"
+            :disabled="isExporting"
+            @click="exportModel"
+            style="width:100%; margin-top:0.6rem; justify-content:center;"
+          >
+            {{ isExporting ? '⏳ Exportando…' : '📥 Exportar modelo' }}
+          </button>
+
           <!-- Barras de probabilidad por clase (se actualizan al predecir) -->
           <div v-if="isTrainingComplete" class="prob-list">
             <div v-for="cls in trainedClassNames" :key="cls" class="prob-row">
@@ -1060,4 +1071,10 @@ button:disabled { opacity: 0.35; cursor: not-allowed; }
   border: 1.5px solid #dc2626;
 }
 .btn-outline-danger:hover { background: rgba(220,38,38,0.06); }
+
+.btn-export {
+  background: #1B512D;
+  color: #fff;
+}
+.btn-export:hover:not(:disabled) { background: #2d6a4f; }
 </style>

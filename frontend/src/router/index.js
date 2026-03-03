@@ -3,6 +3,7 @@ import HomeView from "../views/HomeView.vue";
 import ModeloImagenes from "../views/ModeloImagenes.vue";
 import ModeloAudio from "../views/ModeloAudio.vue";
 import SeleccionModelo from "@/views/SeleccionModelo.vue";
+import ModeloTexto from "@/views/ModeloTexto.vue";
 
 
 
@@ -28,6 +29,11 @@ const router = createRouter({
             path: "/seleccion-modelo",
             name: "seleccion-modelo",
             component: SeleccionModelo,
+        },
+        {
+            path: "/modelo-texto",
+            name: "modelo-texto",
+            component: ModeloTexto,
         }
     ]
 });

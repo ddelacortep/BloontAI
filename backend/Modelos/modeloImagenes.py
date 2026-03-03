@@ -31,6 +31,7 @@ from tensorflow.keras.applications import MobileNetV2
 from tensorflow.keras.applications.mobilenet_v2 import preprocess_input
 
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from PIL import Image
@@ -528,6 +529,30 @@ def reset():
     state.class_names     = []
     state.training_images = defaultdict(list)
     return {"message": "Memoria limpiada."}
+
+@app.get("/export")
+def export_model():
+    """
+    Exporta el modelo entrenado como un archivo ZIP con:
+      - keras/model.h5          (siempre)
+      - tfjs/model.json + .bin  (si tensorflowjs está instalado)
+      - class_names.json
+      - uso_javascript.html
+      - uso_python.py
+
+    Devuelve un StreamingResponse que el navegador descarga como
+    'modelo_exportado.zip'.
+    """
+    if state.model is None:
+        raise HTTPException(400, "No hay modelo entrenado. Llama /train primero.")
+
+    zip_buf = _build_export_zip(state.model, state.class_names)
+
+    return StreamingResponse(
+        zip_buf,
+        media_type="application/zip",
+        headers={"Content-Disposition": "attachment; filename=modelo_exportado.zip"},
+    )
 
 # ─── Main ─────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":

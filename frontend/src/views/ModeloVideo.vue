@@ -5,17 +5,25 @@ import Header from './components/Header.vue'
 import Botones from './components/Botones.vue'
 import SnakeCanvas from './components/SnakeCanvas.vue'
 import PerformanceChart from './components/PerformanceChart.vue'
-import SnakeGame from '../game/SnakeGame.js'
-import DQNAgent from '../game/DQNAgent.js'
 
 const router = useRouter()
+const API = 'http://localhost:8002'
 
-/* ─── Snake Game + IA ─── */
+/* ─── Snake Game + IA (backend Python) ─── */
 const GRID = 20
-const game = reactive(new SnakeGame(GRID))
-let agent = null
+
+// Estado reactivo del juego para renderizar en SnakeCanvas
+const game = reactive({
+  gridSize: GRID,
+  snake: [{ x: 10, y: 10 }],
+  food: { x: 15, y: 15 },
+  score: 0,
+  direction: 1,
+  gameOver: false,
+})
 
 const isTraining = ref(false)
+const isPlaying = ref(false)
 const isPaused = ref(false)
 const episode = ref(0)
 const currentScore = ref(0)
@@ -23,50 +31,65 @@ const bestScore = ref(0)
 const epsilon = ref(1)
 const scores = ref([])
 const speed = ref(50)
+const trainBatch = ref(50) // episodios por lote de entrenamiento
 
 async function startTraining() {
   if (isTraining.value) return
   isTraining.value = true
   isPaused.value = false
+
+  // Resetear agente en el backend
+  await fetch(`${API}/snake/reset`, { method: 'DELETE' })
   episode.value = 0
   scores.value = []
   bestScore.value = 0
 
-  agent = new DQNAgent(11, 4)
-  await runEpisodes()
+  await runTrainingLoop()
 }
 
-async function runEpisodes() {
+async function runTrainingLoop() {
   while (isTraining.value) {
     if (isPaused.value) { await sleep(200); continue }
 
-    game.reset()
-    let state = game.getState()
-    let done = false
+    // Entrenar un lote de episodios en el backend
+    const res = await fetch(`${API}/snake/train`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ episodes: trainBatch.value, grid_size: GRID }),
+    })
+    const data = await res.json()
 
-    while (!done && isTraining.value) {
-      if (isPaused.value) { await sleep(200); continue }
+    // Actualizar métricas desde la respuesta del backend
+    episode.value = data.episodes_trained
+    bestScore.value = data.best_score
+    epsilon.value = data.epsilon
+    scores.value = [...scores.value, ...data.last_scores]
+    currentScore.value = data.last_scores[data.last_scores.length - 1] ?? 0
 
-      const action = agent.act(state)
-      const result = game.step(action)
-      agent.remember(state, action, result.reward, result.state, result.done)
-
-      state = result.state
-      done = result.done
-      currentScore.value = game.score
-
-      if (speed.value > 0) await sleep(speed.value)
-    }
-
-    await agent.train()
-
-    episode.value++
-    scores.value = [...scores.value, game.score]
-    if (game.score > bestScore.value) bestScore.value = game.score
-    epsilon.value = +agent.epsilon.toFixed(3)
-
-    if (episode.value % 10 === 0) agent.syncTarget()
+    // Reproducir una partida para visualizar el progreso
+    await playOneGame()
   }
+}
+
+async function playOneGame() {
+  const res = await fetch(`${API}/snake/play`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ grid_size: GRID }),
+  })
+  const data = await res.json()
+
+  isPlaying.value = true
+  for (const frame of data.frames) {
+    if (!isTraining.value && !isPlaying.value) break
+    game.snake = frame.snake
+    game.food = frame.food
+    game.score = frame.score
+    game.direction = frame.direction
+    currentScore.value = frame.score
+    if (speed.value > 0) await sleep(speed.value)
+  }
+  isPlaying.value = false
 }
 
 function togglePause() { isPaused.value = !isPaused.value }
@@ -74,7 +97,7 @@ function togglePause() { isPaused.value = !isPaused.value }
 function stopTraining() {
   isTraining.value = false
   isPaused.value = false
-  if (agent) { agent.dispose(); agent = null }
+  isPlaying.value = false
 }
 
 onBeforeUnmount(() => stopTraining())

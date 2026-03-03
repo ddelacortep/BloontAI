@@ -1,205 +1,183 @@
 <script setup>
-import { ref } from 'vue'
+import { ref, reactive, onBeforeUnmount } from 'vue'
 import { useRouter } from 'vue-router'
 import Header from './components/Header.vue'
 import Botones from './components/Botones.vue'
+import SnakeCanvas from './components/SnakeCanvas.vue'
+import PerformanceChart from './components/PerformanceChart.vue'
+import SnakeGame from '../game/SnakeGame.js'
+import DQNAgent from '../game/DQNAgent.js'
 
 const router = useRouter()
 
+/* ─── Snake Game + IA ─── */
+const GRID = 20
+const game = reactive(new SnakeGame(GRID))
+let agent = null
 
-const videoFile = ref(null)
-const videoPreview = ref(null)
-const isProcessing = ref(false)
-const processingProgress = ref(0)
-const processingMsg = ref('')
-const resultVideo = ref(null)
-
-
-function handleVideoUpload(event) {
-  const file = event.target.files[0]
-  if (file && file.type.startsWith('video/')) {
-    videoFile.value = file
-    videoPreview.value = URL.createObjectURL(file)
-  }
-}
-
-function removeVideo() {
-  videoFile.value = null
-  videoPreview.value = null
-}
+const isTraining = ref(false)
+const isPaused = ref(false)
+const episode = ref(0)
+const currentScore = ref(0)
+const bestScore = ref(0)
+const epsilon = ref(1)
+const scores = ref([])
+const speed = ref(50)
 
 async function startTraining() {
-  if (!videoFile.value) {
-    alert('Por favor, sube un video primero')
-    return
-  }
-  
-  isProcessing.value = true
-  processingProgress.value = 0
-  processingMsg.value = 'Analizando video...'
-  
- 
+  if (isTraining.value) return
+  isTraining.value = true
+  isPaused.value = false
+  episode.value = 0
+  scores.value = []
+  bestScore.value = 0
+
+  agent = new DQNAgent(11, 4)
+  await runEpisodes()
 }
 
-function downloadResult() {
-  
-  alert('Funcionalidad en desarrollo')
+async function runEpisodes() {
+  while (isTraining.value) {
+    if (isPaused.value) { await sleep(200); continue }
+
+    game.reset()
+    let state = game.getState()
+    let done = false
+
+    while (!done && isTraining.value) {
+      if (isPaused.value) { await sleep(200); continue }
+
+      const action = agent.act(state)
+      const result = game.step(action)
+      agent.remember(state, action, result.reward, result.state, result.done)
+
+      state = result.state
+      done = result.done
+      currentScore.value = game.score
+
+      if (speed.value > 0) await sleep(speed.value)
+    }
+
+    await agent.train()
+
+    episode.value++
+    scores.value = [...scores.value, game.score]
+    if (game.score > bestScore.value) bestScore.value = game.score
+    epsilon.value = +agent.epsilon.toFixed(3)
+
+    if (episode.value % 10 === 0) agent.syncTarget()
+  }
 }
+
+function togglePause() { isPaused.value = !isPaused.value }
+
+function stopTraining() {
+  isTraining.value = false
+  isPaused.value = false
+  if (agent) { agent.dispose(); agent = null }
+}
+
+onBeforeUnmount(() => stopTraining())
+
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)) }
 </script>
 
 <template>
-  <Header></Header>
-  
+  <Header />
+
   <div class="app">
-    
+    <!-- Top bar -->
     <div class="actions-bar">
-      <Botones class="btn-back" @click="router.push('/SeleccionM')">
+      <Botones class="btn-back" @click="router.push('/seleccion-modelo')">
         <p>← Volver</p>
       </Botones>
-      <span class="page-title">🎮 Modelo Video - Snake IA</span>
+      <span class="page-title">🎮 Modelo Video — Snake IA</span>
       <div></div>
     </div>
 
-    
-    <div class="main-content">
-      
-      <div class="panel panel-upload">
-        <div class="panel-header">
-          <span class="panel-icon">📹</span>
-          <h2>Video de Entrenamiento</h2>
-        </div>
-        
-        <div class="panel-body">
-          <div 
-            class="upload-area"
-            :class="{ 'has-video': videoPreview }"
-          >
-            <div v-if="!videoPreview" class="upload-placeholder">
-              <div class="upload-icon">🎬</div>
-              <p>Arrastra un video aquí o</p>
-              <label class="upload-btn">
-                <input 
-                  type="file" 
-                  accept="video/*" 
-                  @change="handleVideoUpload"
-                  hidden
-                >
-                Seleccionar archivo
-              </label>
-              <span class="upload-hint">MP4, WebM, AVI (máx. 500MB)</span>
-            </div>
-            
-            <div v-else class="video-preview">
-              <video 
-                :src="videoPreview" 
-                controls
-                class="preview-video"
-              ></video>
-              <button class="remove-btn" @click="removeVideo">✕</button>
-            </div>
+    <!-- Layout 2 columnas -->
+    <div class="layout">
+      <!-- COLUMNA IZQUIERDA -->
+      <div class="col-left">
+        <!-- Gráfico rendimiento -->
+        <div class="panel">
+          <div class="panel-header">
+            <span class="panel-icon">📊</span>
+            <h2>Rendimiento</h2>
           </div>
-          
-          <div class="video-info" v-if="videoFile">
-            <p><strong>Archivo:</strong> {{ videoFile.name }}</p>
-            <p><strong>Tamaño:</strong> {{ (videoFile.size / 1024 / 1024).toFixed(2) }} MB</p>
+          <div class="panel-body">
+            <PerformanceChart :scores="scores" />
           </div>
         </div>
       </div>
 
-      
-      <div class="connector">
-        <div class="connector-line"></div>
-        <div class="connector-arrow">▶</div>
-      </div>
+      <!-- COLUMNA DERECHA -->
+      <div class="col-right">
+        <div class="panel panel-game">
+          <div class="panel-header">
+            <span class="panel-icon">🐍</span>
+            <h2>Snake — Entrenamiento IA</h2>
+          </div>
+          <div class="panel-body game-body">
+            <SnakeCanvas :game="game" :size="400" />
 
-      
-      <div class="panel panel-process">
-        <div class="panel-header">
-          <span class="panel-icon">🧠</span>
-          <h2>Entrenamiento IA</h2>
-        </div>
-        
-        <div class="panel-body">
-          <div v-if="!isProcessing && !resultVideo" class="process-idle">
-            <p class="hint">La IA aprenderá a jugar Snake analizando tu video de gameplay.</p>
-            
-            <div class="steps-list">
+            <!-- Stats -->
+            <div class="stats-row">
+              <div class="stat">
+                <span class="stat-label">Episodio</span>
+                <span class="stat-value">{{ episode }}</span>
+              </div>
+              <div class="stat">
+                <span class="stat-label">Score actual</span>
+                <span class="stat-value">{{ currentScore }}</span>
+              </div>
+              <div class="stat">
+                <span class="stat-label">Mejor score</span>
+                <span class="stat-value highlight">{{ bestScore }}</span>
+              </div>
+              <div class="stat">
+                <span class="stat-label">Epsilon (ε)</span>
+                <span class="stat-value">{{ epsilon }}</span>
+              </div>
+            </div>
+
+            <!-- Velocidad -->
+            <div class="speed-control">
+              <label>Velocidad: <strong>{{ speed === 0 ? 'Máxima' : speed + ' ms' }}</strong></label>
+              <input type="range" min="0" max="200" step="10" v-model.number="speed" />
+            </div>
+
+            <!-- Botones -->
+            <div class="controls">
+              <Botones v-if="!isTraining" class="btn-train" @click="startTraining">
+                <p>🚀 Iniciar Entrenamiento</p>
+              </Botones>
+              <template v-else>
+                <Botones class="btn-pause" @click="togglePause">
+                  <p>{{ isPaused ? '▶ Reanudar' : '⏸ Pausar' }}</p>
+                </Botones>
+                <Botones class="btn-stop" @click="stopTraining">
+                  <p>⏹ Detener</p>
+                </Botones>
+              </template>
+            </div>
+
+            <!-- Pasos -->
+            <div v-if="!isTraining && episode === 0" class="steps-list">
               <div class="step">
                 <span class="step-num">1</span>
-                <span>Sube un video jugando al Snake</span>
+                <span>Pulsa "Iniciar Entrenamiento"</span>
               </div>
               <div class="step">
                 <span class="step-num">2</span>
-                <span>La IA analizará tus movimientos</span>
+                <span>La IA aprende por Deep Q-Learning en tiempo real</span>
               </div>
               <div class="step">
                 <span class="step-num">3</span>
-                <span>Entrenará usando tus estrategias</span>
+                <span>Observa cómo mejora en el gráfico de rendimiento</span>
               </div>
             </div>
-            
-            <Botones 
-              class="btn-train"
-              :class="{ disabled: !videoFile }"
-              @click="startTraining"
-            >
-              <p>🚀 Iniciar Entrenamiento</p>
-            </Botones>
           </div>
-          
-          <div v-if="isProcessing" class="process-running">
-            <div class="progress-circle">
-              <span class="progress-pct">{{ processingProgress }}%</span>
-            </div>
-            <div class="progress-bar">
-              <div class="progress-fill" :style="{ width: processingProgress + '%' }"></div>
-            </div>
-            <p class="progress-msg">{{ processingMsg }}</p>
-          </div>
-          
-          <div v-if="resultVideo" class="process-done">
-            <div class="success-icon">✅</div>
-            <p>¡Entrenamiento completado!</p>
-          </div>
-        </div>
-      </div>
-
-      
-      <div class="connector">
-        <div class="connector-line"></div>
-        <div class="connector-arrow">▶</div>
-      </div>
-
-      
-      <div class="panel panel-result">
-        <div class="panel-header">
-          <span class="panel-icon">🐍</span>
-          <h2>Resultado</h2>
-        </div>
-        
-        <div class="panel-body">
-          <div class="result-area">
-            <div v-if="!resultVideo" class="result-placeholder">
-              <div class="result-icon">🎮</div>
-              <p>Aquí aparecerá el video de la IA jugando al Snake</p>
-            </div>
-            
-            <div v-else class="result-video">
-              <video 
-                :src="resultVideo" 
-                controls
-                class="preview-video"
-              ></video>
-            </div>
-          </div>
-          
-          <Botones 
-            v-if="resultVideo"
-            class="btn-download"
-            @click="downloadResult"
-          >
-            <p>📥 Descargar Video</p>
-          </Botones>
         </div>
       </div>
     </div>
@@ -216,7 +194,7 @@ function downloadResult() {
   min-height: 100vh;
 }
 
-
+/* Top bar */
 .actions-bar {
   display: flex;
   align-items: center;
@@ -225,7 +203,6 @@ function downloadResult() {
   background: #fff;
   border-bottom: 1px solid #e5e7eb;
 }
-
 .btn-back {
   background-color: #1B512D;
   border-radius: 15px;
@@ -235,345 +212,104 @@ function downloadResult() {
   font-weight: 600;
   border: none;
 }
+.btn-back p { margin: 0; color: white; }
+.page-title { font-size: 1.2rem; font-weight: 700; color: #1B512D; }
 
-.btn-back p {
-  margin: 0;
-  color: white;
-}
-
-.page-title {
-  font-size: 1.2rem;
-  font-weight: 700;
-  color: #1B512D;
-}
-
-
-.main-content {
+/* Layout */
+.layout {
   display: flex;
+  gap: 1.5rem;
+  padding: 1.5rem 2rem;
   align-items: flex-start;
-  justify-content: center;
-  gap: 0;
-  padding: 2rem;
-  min-height: calc(100vh - 140px);
 }
+.col-left {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  min-width: 0;
+}
+.col-right { flex: 1.2; min-width: 0; }
 
-
+/* Panel */
 .panel {
   background: #fff;
   border-radius: 20px;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
-  min-width: 320px;
-  max-width: 380px;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.08);
   overflow: hidden;
 }
-
 .panel-header {
   background: linear-gradient(135deg, #1B512D 0%, #2D7A4A 100%);
   color: white;
-  padding: 1rem 1.5rem;
+  padding: 0.9rem 1.3rem;
   display: flex;
   align-items: center;
-  gap: 0.8rem;
+  gap: 0.7rem;
 }
+.panel-icon { font-size: 1.3rem; }
+.panel-header h2 { margin: 0; font-size: 1rem; font-weight: 600; }
+.panel-body { padding: 1.2rem; }
 
-.panel-icon {
-  font-size: 1.5rem;
-}
-
-.panel-header h2 {
-  margin: 0;
-  font-size: 1.1rem;
-  font-weight: 600;
-}
-
-.panel-body {
-  padding: 1.5rem;
-}
-
-
-.upload-area {
-  border: 3px dashed #7FD1AE;
-  border-radius: 15px;
-  padding: 2rem;
-  text-align: center;
-  transition: all 0.3s ease;
-  min-height: 280px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.upload-area:hover {
-  border-color: #1B512D;
-  background: #f0fdf4;
-}
-
-.upload-area.has-video {
-  border-style: solid;
-  padding: 0;
-}
-
-.upload-placeholder {
+/* Game body */
+.game-body {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  gap: 0.8rem;
-}
-
-.upload-icon {
-  font-size: 4rem;
-}
-
-.upload-placeholder p {
-  margin: 0;
-  color: #666;
-}
-
-.upload-btn {
-  background: #7FD1AE;
-  color: #1B512D;
-  padding: 0.8rem 1.5rem;
-  border-radius: 10px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.3s ease;
-}
-
-.upload-btn:hover {
-  background: #1B512D;
-  color: white;
-}
-
-.upload-hint {
-  font-size: 0.8rem;
-  color: #999;
-}
-
-.video-preview {
-  position: relative;
-  width: 100%;
-  height: 100%;
-}
-
-.preview-video {
-  width: 100%;
-  border-radius: 12px;
-}
-
-.remove-btn {
-  position: absolute;
-  top: 10px;
-  right: 10px;
-  background: #dc2626;
-  color: white;
-  border: none;
-  border-radius: 50%;
-  width: 30px;
-  height: 30px;
-  cursor: pointer;
-  font-size: 1rem;
-}
-
-.video-info {
-  margin-top: 1rem;
-  padding: 1rem;
-  background: #f0fdf4;
-  border-radius: 10px;
-  font-size: 0.9rem;
-}
-
-.video-info p {
-  margin: 0.3rem 0;
-  color: #1B512D;
-}
-
-
-.connector {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 0 1rem;
-}
-
-.connector-line {
-  width: 60px;
-  height: 3px;
-  background: #7FD1AE;
-}
-
-.connector-arrow {
-  color: #1B512D;
-  font-size: 1.5rem;
-  margin-top: -0.5rem;
-}
-
-
-.process-idle {
-  text-align: center;
-}
-
-.hint {
-  color: #666;
-  font-size: 0.95rem;
-  margin-bottom: 1.5rem;
-}
-
-.steps-list {
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-  margin-bottom: 1.5rem;
-}
-
-.step {
-  display: flex;
   align-items: center;
   gap: 1rem;
-  text-align: left;
-  padding: 0.8rem;
-  background: #f0fdf4;
-  border-radius: 10px;
 }
 
-.step-num {
-  background: #1B512D;
-  color: white;
-  width: 28px;
-  height: 28px;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-weight: 700;
-  font-size: 0.9rem;
+/* Stats */
+.stats-row {
+  display: flex; gap: 1rem; flex-wrap: wrap;
+  justify-content: center; width: 100%;
 }
+.stat {
+  background: #f0fdf4; border-radius: 12px;
+  padding: 0.6rem 1rem; text-align: center; min-width: 90px;
+}
+.stat-label { display: block; font-size: 0.7rem; color: #666; text-transform: uppercase; letter-spacing: 0.5px; }
+.stat-value { display: block; font-size: 1.3rem; font-weight: 700; color: #1B512D; }
+.stat-value.highlight { color: #B1CF5F; }
 
+/* Speed */
+.speed-control { width: 100%; max-width: 400px; text-align: center; }
+.speed-control label { font-size: 0.85rem; color: #666; }
+.speed-control input[type=range] { width: 100%; accent-color: #1B512D; margin-top: 0.3rem; }
+
+/* Controls */
+.controls { display: flex; gap: 0.8rem; flex-wrap: wrap; justify-content: center; }
 .btn-train {
   background: linear-gradient(135deg, #B1CF5F 0%, #7FD1AE 100%);
-  color: #1B512D;
-  padding: 1rem 2rem;
-  border-radius: 15px;
-  font-weight: 700;
-  border: none;
-  width: 100%;
+  color: #1B512D; padding: 0.9rem 2rem; border-radius: 15px;
+  font-weight: 700; border: none;
 }
-
-.btn-train.disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
+.btn-train p { margin: 0; }
+.btn-pause {
+  background: #f59e0b; color: #fff;
+  padding: 0.8rem 1.5rem; border-radius: 15px;
+  font-weight: 600; border: none;
 }
-
-.btn-train p {
-  margin: 0;
+.btn-pause p { margin: 0; color: white; }
+.btn-stop {
+  background: #dc2626; color: #fff;
+  padding: 0.8rem 1.5rem; border-radius: 15px;
+  font-weight: 600; border: none;
 }
+.btn-stop p { margin: 0; color: white; }
 
-
-.process-running {
-  text-align: center;
+/* Steps */
+.steps-list { display: flex; flex-direction: column; gap: 0.7rem; width: 100%; max-width: 400px; }
+.step { display: flex; align-items: center; gap: 0.8rem; padding: 0.6rem; background: #f0fdf4; border-radius: 10px; }
+.step-num {
+  background: #1B512D; color: white; width: 26px; height: 26px;
+  border-radius: 50%; display: flex; align-items: center; justify-content: center;
+  font-weight: 700; font-size: 0.8rem; flex-shrink: 0;
 }
+.step span:last-child { font-size: 0.9rem; }
 
-.progress-circle {
-  width: 120px;
-  height: 120px;
-  border-radius: 50%;
-  background: linear-gradient(135deg, #7FD1AE 0%, #B1CF5F 100%);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  margin: 0 auto 1.5rem;
-}
-
-.progress-pct {
-  font-size: 2rem;
-  font-weight: 700;
-  color: #1B512D;
-}
-
-.progress-bar {
-  height: 8px;
-  background: #e5e7eb;
-  border-radius: 4px;
-  overflow: hidden;
-  margin-bottom: 1rem;
-}
-
-.progress-fill {
-  height: 100%;
-  background: linear-gradient(90deg, #1B512D, #7FD1AE);
-  border-radius: 4px;
-  transition: width 0.3s ease;
-}
-
-.progress-msg {
-  color: #666;
-  font-size: 0.95rem;
-}
-
-
-.result-area {
-  border: 3px dashed #7FD1AE;
-  border-radius: 15px;
-  min-height: 280px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.result-placeholder {
-  text-align: center;
-  color: #999;
-}
-
-.result-icon {
-  font-size: 4rem;
-  margin-bottom: 1rem;
-}
-
-.result-placeholder p {
-  margin: 0;
-}
-
-.process-done {
-  text-align: center;
-}
-
-.success-icon {
-  font-size: 4rem;
-  margin-bottom: 1rem;
-}
-
-.btn-download {
-  background: #1B512D;
-  color: white;
-  padding: 1rem 2rem;
-  border-radius: 15px;
-  font-weight: 600;
-  border: none;
-  width: 100%;
-  margin-top: 1rem;
-}
-
-.btn-download p {
-  margin: 0;
-  color: white;
-}
-
-
-@media (max-width: 1200px) {
-  .main-content {
-    flex-direction: column;
-    align-items: center;
-  }
-  
-  .connector {
-    transform: rotate(90deg);
-    padding: 1rem 0;
-  }
-  
-  .panel {
-    max-width: 100%;
-    width: 100%;
-  }
+/* Responsive */
+@media (max-width: 960px) {
+  .layout { flex-direction: column; }
+  .col-right { order: -1; }
 }
 </style>    

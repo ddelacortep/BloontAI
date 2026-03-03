@@ -111,11 +111,11 @@ const modelos = ref([
   },
   {
     id: 4, 
-    label: 'Audio', 
-    link: '/modelo-audio', 
-    class: 'modelo-audio',
+    label: 'Texto', 
+    link: '/modelo-texto', 
+    class: 'modelo-texto',
     nombre: 'Transcribir',
-    descripcion: 'Convierte audio en texto con reconocimiento de voz.',
+    descripcion: 'Convierte audio, video o imagen a texto simplemente subiendolo.',
     icono: '📝'
   }
 ])

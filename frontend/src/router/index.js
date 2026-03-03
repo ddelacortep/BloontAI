@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from "vue-router";
 import HomeView from "../views/HomeView.vue";
 import ModeloImagenes from "../views/ModeloImagenes.vue";
+import ModeloVideo from "../views/ModeloVideo.vue";
 import ModeloAudio from "../views/ModeloAudio.vue";
 import SeleccionModelo from "@/views/SeleccionModelo.vue";
 import ModeloTexto from "@/views/ModeloTexto.vue";
@@ -34,6 +35,11 @@ const router = createRouter({
             path: "/modelo-texto",
             name: "modelo-texto",
             component: ModeloTexto,
+        },
+        {
+            path: "/modelo-video",
+            name: "modelo-video",
+            component: ModeloVideo,
         }
     ]
 });

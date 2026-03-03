@@ -5,68 +5,121 @@ import Header from './components/Header.vue'
 import Botones from './components/Botones.vue'
 import SnakeCanvas from './components/SnakeCanvas.vue'
 import PerformanceChart from './components/PerformanceChart.vue'
-import SnakeGame from '../game/SnakeGame.js'
-import DQNAgent from '../game/DQNAgent.js'
 
 const router = useRouter()
+const API = 'http://localhost:8002'
 
-/* ─── Snake Game + IA ─── */
+/* ─── Snake Game + IA (backend Python) ─── */
 const GRID = 20
-const game = reactive(new SnakeGame(GRID))
-let agent = null
+
+// Estado reactivo del juego para renderizar en SnakeCanvas
+const game = reactive({
+  gridSize: GRID,
+  snake: [{ x: 10, y: 10 }],
+  food: { x: 15, y: 15 },
+  score: 0,
+  direction: 1,
+  gameOver: false,
+})
 
 const isTraining = ref(false)
+const isPlaying = ref(false)
 const isPaused = ref(false)
+const isLoading = ref(false)
 const episode = ref(0)
 const currentScore = ref(0)
 const bestScore = ref(0)
 const epsilon = ref(1)
 const scores = ref([])
 const speed = ref(50)
+const trainBatch = ref(10) // episodios por lote de entrenamiento
+const statusText = ref('')
 
 async function startTraining() {
   if (isTraining.value) return
   isTraining.value = true
   isPaused.value = false
-  episode.value = 0
-  scores.value = []
-  bestScore.value = 0
+  statusText.value = 'Reseteando agente...'
 
-  agent = new DQNAgent(11, 4)
-  await runEpisodes()
+  try {
+    // Resetear agente en el backend
+    await fetch(`${API}/snake/reset`, { method: 'DELETE' })
+    episode.value = 0
+    scores.value = []
+    bestScore.value = 0
+
+    await runTrainingLoop()
+  } catch (e) {
+    console.error('Error en startTraining:', e)
+    statusText.value = 'Error: ' + e.message
+    isTraining.value = false
+  }
 }
 
-async function runEpisodes() {
+async function runTrainingLoop() {
   while (isTraining.value) {
     if (isPaused.value) { await sleep(200); continue }
 
-    game.reset()
-    let state = game.getState()
-    let done = false
+    try {
+      isLoading.value = true
+      statusText.value = `Entrenando ${trainBatch.value} episodios...`
 
-    while (!done && isTraining.value) {
-      if (isPaused.value) { await sleep(200); continue }
+      // Entrenar un lote de episodios en el backend
+      const res = await fetch(`${API}/snake/train`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ episodes: trainBatch.value, grid_size: GRID }),
+      })
 
-      const action = agent.act(state)
-      const result = game.step(action)
-      agent.remember(state, action, result.reward, result.state, result.done)
+      if (!res.ok) {
+        const err = await res.text()
+        console.error('Error /snake/train:', err)
+        statusText.value = 'Error en entrenamiento'
+        break
+      }
 
-      state = result.state
-      done = result.done
-      currentScore.value = game.score
+      const data = await res.json()
+      isLoading.value = false
 
-      if (speed.value > 0) await sleep(speed.value)
+      // Actualizar métricas desde la respuesta del backend
+      episode.value = data.episodes_trained
+      bestScore.value = data.best_score
+      epsilon.value = data.epsilon
+      scores.value = [...scores.value, ...data.last_scores]
+      currentScore.value = data.last_scores[data.last_scores.length - 1] ?? 0
+
+      // Reproducir una partida para visualizar el progreso
+      statusText.value = 'Reproduciendo partida de la IA...'
+      await playOneGame()
+      statusText.value = ''
+    } catch (e) {
+      console.error('Error en runTrainingLoop:', e)
+      statusText.value = 'Error: ' + e.message
+      isLoading.value = false
+      break
     }
-
-    await agent.train()
-
-    episode.value++
-    scores.value = [...scores.value, game.score]
-    if (game.score > bestScore.value) bestScore.value = game.score
-    epsilon.value = +agent.epsilon.toFixed(3)
-
-    if (episode.value % 10 === 0) agent.syncTarget()
   }
+}
+
+async function playOneGame() {
+  const res = await fetch(`${API}/snake/play`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ grid_size: GRID }),
+  })
+  const data = await res.json()
+
+  isPlaying.value = true
+  for (const frame of data.frames) {
+    if (!isTraining.value && !isPlaying.value) break
+    game.snake = frame.snake
+    game.food = frame.food
+    game.score = frame.score
+    game.direction = frame.direction
+    currentScore.value = frame.score
+    if (speed.value > 0) await sleep(speed.value)
+  }
+  isPlaying.value = false
 }
 
 function togglePause() { isPaused.value = !isPaused.value }
@@ -74,7 +127,7 @@ function togglePause() { isPaused.value = !isPaused.value }
 function stopTraining() {
   isTraining.value = false
   isPaused.value = false
-  if (agent) { agent.dispose(); agent = null }
+  isPlaying.value = false
 }
 
 onBeforeUnmount(() => stopTraining())
@@ -139,6 +192,12 @@ function sleep(ms) { return new Promise(r => setTimeout(r, ms)) }
                 <span class="stat-label">Epsilon (ε)</span>
                 <span class="stat-value">{{ epsilon }}</span>
               </div>
+            </div>
+
+            <!-- Status -->
+            <div v-if="statusText" class="status-bar">
+              <span class="spinner" v-if="isLoading">⏳</span>
+              {{ statusText }}
             </div>
 
             <!-- Velocidad -->
@@ -270,6 +329,15 @@ function sleep(ms) { return new Promise(r => setTimeout(r, ms)) }
 .stat-label { display: block; font-size: 0.7rem; color: #666; text-transform: uppercase; letter-spacing: 0.5px; }
 .stat-value { display: block; font-size: 1.3rem; font-weight: 700; color: #1B512D; }
 .stat-value.highlight { color: #B1CF5F; }
+
+/* Status */
+.status-bar {
+  background: #fef9c3; color: #854d0e; padding: 0.5rem 1rem;
+  border-radius: 10px; font-size: 0.85rem; font-weight: 600;
+  text-align: center; width: 100%; max-width: 400px;
+}
+.spinner { animation: spin 1s linear infinite; display: inline-block; }
+@keyframes spin { to { transform: rotate(360deg); } }
 
 /* Speed */
 .speed-control { width: 100%; max-width: 400px; text-align: center; }

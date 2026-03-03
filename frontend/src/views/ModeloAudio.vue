@@ -314,25 +314,6 @@ function stopListening() {
   _stopListening = true
 }
 
-// ─── Exportar modelo entrenado ────────────────────────────────────────────
-const exporting = ref(false)
-
-async function exportModel() {
-  exporting.value = true
-  try {
-    // El backend genera y sirve directamente los archivos
-    for (const endpoint of ['python', 'js']) {
-      const a = document.createElement('a')
-      a.href = `${API}/audio/export/${endpoint}`
-      a.download = ''
-      a.click()
-      await sleep(400)
-    }
-  } finally {
-    exporting.value = false
-  }
-}
-
 // ─── Reiniciar todo ───────────────────────────────────────────────────────
 async function resetAll() {
   stopListening()
@@ -475,16 +456,6 @@ onUnmounted(() => {
           <div v-if="trainDone" class="accuracy-badge">
             ✅ Precisión: <strong>{{ (trainAccuracy * 100).toFixed(1) }}%</strong>
           </div>
-
-          <button
-            v-if="trainDone"
-            class="btn btn-export"
-            :disabled="exporting"
-            @click="exportModel"
-            title="Descarga voice_recognizer.py y voice_recognizer.js"
-          >
-            {{ exporting ? '⏳ Exportando…' : '⬇️ Exportar modelo' }}
-          </button>
         </div>
       </div>
 
@@ -828,14 +799,4 @@ button:disabled { opacity: 0.35; cursor: not-allowed; }
 .btn-danger  { background: #dc2626; color: #fff; }
 .btn-info    { background: #0369a1; color: #fff; }
 .btn-ghost   { background: rgba(0,0,0,0.04); color: #555; border: 1px solid #ccc; }
-.btn-export  {
-  width: 100%; margin-top: 0.7rem; display: block;
-  background: linear-gradient(135deg, #1a3a26 0%, #2d6a4f 100%);
-  color: #fff; font-weight: 700; font-size: 0.9rem;
-  padding: 0.6rem 1rem; border-radius: 8px;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.18);
-  transition: opacity 0.2s, transform 0.15s;
-}
-.btn-export:hover:not(:disabled) { opacity: 0.88; transform: translateY(-1px); }
-.btn-export:disabled { opacity: 0.4; cursor: not-allowed; }
 </style>

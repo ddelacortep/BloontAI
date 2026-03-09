@@ -103,7 +103,7 @@ const modelos = ref([
   {
     id: 3, 
     label: 'Video', 
-    link: '/modelo-videos', 
+    link: '/modelo-video', 
     class: 'modelo-videos',
     nombre: 'Video',
     descripcion: 'Procesa y analiza videos desde archivos o captura.',

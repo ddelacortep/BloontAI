@@ -24,7 +24,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-# â”€â”€â”€ ConfiguraciÃ³n â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# 
 AUDIO_SR = 22050          # Sample-rate estÃ¡ndar para MFCCs
 N_MFCC   = 40             # NÂº de coeficientes MFCC
 # Features: MFCCs(40) mean+std + delta-MFCCs(40) mean+std + chroma(12) mean+std
@@ -42,7 +42,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# â”€â”€â”€ Estado global (solo en RAM, desaparece al reiniciar) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 class AudioState:
     model: Optional[tf.keras.Model] = None
     user_names: list = []
@@ -57,7 +56,7 @@ class AudioState:
 
 state = AudioState()
 
-# â”€â”€â”€ Modelos Pydantic â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+#  Modelos Pydantic 
 
 class AudioPayload(BaseModel):
     label: str
@@ -71,7 +70,7 @@ class AudioPredictPayload(BaseModel):
     audio_b64: str
     sample_rate: int = 48000
 
-# â”€â”€â”€ Utilidades de procesamiento â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+#  Utilidades de procesamiento 
 
 def process_audio(audio_data: np.ndarray, sample_rate: int = 48000) -> np.ndarray:
     """
@@ -93,27 +92,27 @@ def process_audio(audio_data: np.ndarray, sample_rate: int = 48000) -> np.ndarra
     if sample_rate != AUDIO_SR:
         audio_data = librosa.resample(audio_data, orig_sr=sample_rate, target_sr=AUDIO_SR)
 
-    # â”€â”€ MFCCs â”€â”€
+    #  MFCCs 
     mfccs = librosa.feature.mfcc(y=audio_data, sr=AUDIO_SR, n_mfcc=N_MFCC)
     mfcc_mean = np.mean(mfccs.T, axis=0)
     mfcc_std  = np.std(mfccs.T, axis=0)
 
-    # â”€â”€ Delta MFCCs (velocidad de cambio temporal) â”€â”€
+    #  Delta MFCCs (velocidad de cambio temporal)  
     delta_mfccs = librosa.feature.delta(mfccs)
     delta_mean  = np.mean(delta_mfccs.T, axis=0)
     delta_std   = np.std(delta_mfccs.T, axis=0)
 
-    # â”€â”€ Chroma (distribuciÃ³n tonal â€” 12 semitonos) â”€â”€
+    #  Chroma (distribuciÃ³n tonal â€” 12 semitonos)  
     chroma = librosa.feature.chroma_stft(y=audio_data, sr=AUDIO_SR)
     chroma_mean = np.mean(chroma.T, axis=0)
     chroma_std  = np.std(chroma.T, axis=0)
 
-    # â”€â”€ Spectral Contrast (7 sub-bandas) â”€â”€
+    #  Spectral Contrast (7 sub-bandas)  
     contrast = librosa.feature.spectral_contrast(y=audio_data, sr=AUDIO_SR)
     contrast_mean = np.mean(contrast.T, axis=0)
     contrast_std  = np.std(contrast.T, axis=0)
 
-    # â”€â”€ Zero Crossing Rate â”€â”€
+    #  Zero Crossing Rate  
     zcr = librosa.feature.zero_crossing_rate(y=audio_data)
     zcr_mean = np.mean(zcr)
     zcr_std  = np.std(zcr)
@@ -161,7 +160,7 @@ def augment_features(X: np.ndarray, y: np.ndarray, factor: int = 3) -> tuple:
         y_aug.append(y)
     return np.concatenate(X_aug), np.concatenate(y_aug)
 
-# â”€â”€â”€ Endpoints â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+#  Endpoints 
 
 @app.get("/")
 def root():
@@ -230,7 +229,7 @@ def train_audio(req: AudioTrainRequest):
     X = np.array(X, dtype=np.float32)
     y = np.array(y)
 
-    # NormalizaciÃ³n (z-score) â€” guardamos media y std para la predicciÃ³n
+    # NormalizaciÃ³n (z-score) guardamos media y std para la predicciÃ³n
     norm_mean = X.mean(axis=0)
     norm_std  = X.std(axis=0) + 1e-8
     X = (X - norm_mean) / norm_std
@@ -329,7 +328,7 @@ def reset_audio():
     state.norm_std   = None
     return {"message": "Datos de audio limpiados."}
 
-# â”€â”€â”€ Main â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# Main 
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("modeloAudio:app", host="0.0.0.0", port=8001, reload=False)

@@ -17,22 +17,22 @@ export default defineConfig({
   },
   server: {
     proxy: {
-      // ⚠️  /api-audio ANTES de /api para que no lo capture la regla genérica
+      // ⚠️  /api-audio y /api-texto ANTES de /api para que no los capture la regla genérica
       '/api-audio': {
         target: 'http://localhost:8001',
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api-audio/, ''),
+      },
+      '/api-texto': {
+        target: 'http://127.0.0.1:8002',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api-texto/, ''),
       },
       // Cualquier petición a /api/... se redirige a FastAPI en :8000
       '/api': {
         target: 'http://localhost:8000',
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api/, ''),
-      },
-      '/api-texto': {
-        target: 'http://localhost:5000',
-        changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/api-texto/, '/api-texto'),
       },
     },
   },

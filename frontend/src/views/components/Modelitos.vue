@@ -10,20 +10,19 @@
                 <span>{{ archivos[modelo.tipo].name }}</span>
                 <button @click="deleteFile(modelo.tipo)" class="btn-eliminar">Eliminar</button>
             </div>
-                        <button
-                            v-if="modelo.tipo === 'imagen'"
-                            class="modelo-btn"
-                            @click="generarImagen"
-                        >Generar Imagen</button>
-                        <button
-                            v-else
-                            class="modelo-btn"
-                            disabled
-                        >Generar {{modelo.nombre}}</button>
-            <div v-if="errorArchivo" class="error-archivo">
-                {{ errorArchivo }}
+            <button
+                class="modelo-btn"
+                :disabled="!archivos[modelo.tipo] || cargando[modelo.tipo]"
+                @click="generar(modelo.tipo)"
+            >
+                {{ cargando[modelo.tipo] ? 'Generando...' : 'Generar ' + modelo.nombre }}
+            </button>
+            <div v-if="errores[modelo.tipo]" class="error-archivo">
+                {{ errores[modelo.tipo] }}
             </div>
-            <button @click="generarImagen" class="modelo-btn">Generar Imagen</button>
+            <div v-if="resultados[modelo.tipo]" class="resultado">
+                {{ resultados[modelo.tipo] }}
+            </div>
         </div>
     </div>
 </template>
@@ -33,8 +32,8 @@ import { ref, reactive } from 'vue';
 import RegexpFileInput from './RegexpFileInput.vue';
 
 const modelos = ref([
-    { id: 1, nombre: "Audio", tipo: "audio"},
-    { id: 2, nombre: "Video", tipo: "video"},
+    { id: 1, nombre: "Audio", tipo: "audio" },
+    { id: 2, nombre: "Video", tipo: "video" },
     { id: 3, nombre: "Imagen", tipo: "imagen" },
 ]);
 
@@ -44,36 +43,51 @@ const regexpImagen = /\.jpg$/i;
 
 const emit = defineEmits(['file-selected']);
 
-const archivos = reactive({ audio: null, video: null, imagen: null });
+const archivos  = reactive({ audio: null,  video: null,  imagen: null });
+const cargando  = reactive({ audio: false, video: false, imagen: false });
+const errores   = reactive({ audio: '',    video: '',    imagen: '' });
+const resultados = reactive({ audio: '',   video: '',    imagen: '' });
+
+const rutas = {
+    imagen: '/api-texto/imagen-a-texto',
+    video:  '/api-texto/video-a-texto',
+    audio:  '/api-texto/audio-a-texto',
+};
 
 function handleFileSelected({ tipo, file }) {
     archivos[tipo] = file;
+    errores[tipo] = '';
+    resultados[tipo] = '';
     emit('file-selected', { tipo, file });
 }
 
 function deleteFile(tipo) {
     archivos[tipo] = null;
+    errores[tipo] = '';
+    resultados[tipo] = '';
     emit('file-selected', { tipo, file: null });
 }
 
-async function generarImagen() {
-    const file = archivos['imagen'];
+async function generar(tipo) {
+    const file = archivos[tipo];
     if (!file) return;
+    cargando[tipo] = true;
+    errores[tipo] = '';
+    resultados[tipo] = '';
     const formData = new FormData();
-    formData.append('imagen', file);
+    formData.append(tipo, file);
     try {
-        const response = await fetch('/api-texto/imagen-a-texto', {
-            method: 'POST',
-            body: formData
-        });
+        const response = await fetch(rutas[tipo], { method: 'POST', body: formData });
         const data = await response.json();
-        if (data.caption) {
-            alert('Descripción generada: ' + data.caption);
-        } else if (data.error) {
-            alert('Error: ' + data.error);
+        if (!response.ok) {
+            errores[tipo] = data.error || 'Error del servidor';
+        } else {
+            resultados[tipo] = data.caption ?? data.texto ?? JSON.stringify(data);
         }
     } catch (err) {
-        alert('Error de conexión con el backend');
+        errores[tipo] = 'Error de conexión con el backend';
+    } finally {
+        cargando[tipo] = false;
     }
 }
 </script>
@@ -122,9 +136,6 @@ body {
     letter-spacing: 0.5px;
 }
 
-.archivo {
-    margin-top: 16px;
-}
 .archivo-info {
     margin-top: 12px;
     display: flex;
@@ -133,7 +144,9 @@ body {
     background: #fff2;
     border-radius: 6px;
     padding: 6px 10px;
+    width: 100%;
 }
+
 .btn-eliminar {
     background: #d32f2f;
     color: #fff;
@@ -147,32 +160,6 @@ body {
 }
 .btn-eliminar:hover {
     background: #b71c1c;
-}
-.modelo-btn {
-    width: 100%;
-    background: #1976d2;
-    color: #fff;
-    border: none;
-    border-radius: 6px;
-    padding: 10px 0;
-    font-size: 1rem;
-    font-weight: 600;
-    margin-top: 24px;
-    cursor: pointer;
-    transition: background 0.2s;
-}
-.modelo-btn:hover {
-    background: #1565c0;
-}
-.error-archivo {
-    color: #fff;
-    background: #d32f2f;
-    padding: 12px;
-    border-radius: 6px;
-    margin-bottom: 16px;
-    font-weight: bold;
-    width: 100%;
-    text-align: center;
 }
 
 .modelo-btn {
@@ -188,7 +175,37 @@ body {
     cursor: pointer;
     transition: background 0.2s;
 }
-.modelo-btn:hover {
+.modelo-btn:hover:not(:disabled) {
     background: #1565c0;
+}
+.modelo-btn:disabled {
+    background: #455a7a;
+    cursor: not-allowed;
+    opacity: 0.6;
+}
+
+.error-archivo {
+    color: #fff;
+    background: #d32f2f;
+    padding: 10px 12px;
+    border-radius: 6px;
+    margin-top: 12px;
+    font-weight: bold;
+    width: 100%;
+    text-align: center;
+    box-sizing: border-box;
+}
+
+.resultado {
+    margin-top: 14px;
+    background: #fff2;
+    border-radius: 8px;
+    padding: 10px 14px;
+    width: 100%;
+    font-size: 0.95rem;
+    color: #e3f0ff;
+    line-height: 1.5;
+    box-sizing: border-box;
+    word-break: break-word;
 }
 </style>
